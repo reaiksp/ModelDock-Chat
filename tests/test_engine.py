@@ -23,7 +23,7 @@ class FakeClient:
         if json_mode:
             if "memories" in messages[0]["content"]:
                 return json.dumps({"memories": [
-                    {"content": "喜欢简洁", "evidence": "我喜欢简洁", "kind": "偏好"},
+                    {"summary": "喜欢简洁", "score": 8, "analysis": "可用于调整回答长度", "evidence": "我喜欢简洁"},
                     {"content": "编造", "evidence": "不存在的证据"}]}, ensure_ascii=False)
             return json.dumps({"entries": [{"term": "YYDS", "definition": "永远的神", "example": "真是YYDS", "aliases": "yyds"}]}, ensure_ascii=False)
         if "续聊摘要" in messages[0]["content"]:
@@ -125,3 +125,15 @@ def test_cancelled_request_cannot_create_a_message(setup):
     with pytest.raises(Cancelled):
         engine.chat(session, "hi", task, lambda *a: None)
     assert not store.messages(session)
+
+
+def test_reply_preference_adapts_request_copy_and_counts_overhead(setup):
+    store,client,engine,session=setup
+    store.set('response_language','en')
+    raw='用户原始提示词，必须保持不变。'
+    before=engine.preview(session,raw)
+    engine.chat(session,raw,Task(),lambda *a:None)
+    assert store.messages(session)[0]['content']==raw
+    sent=client.calls[-1][-1]['content']
+    assert sent.startswith(raw) and 'Application preference' in sent
+    assert before['used']==message_cost(client.calls[-1])

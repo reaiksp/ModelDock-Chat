@@ -8,3 +8,4 @@
 .gitattributes text eol=lf
 *.ico binary
 *.png binary
+*.json text eol=lf

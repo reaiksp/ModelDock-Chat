@@ -18,6 +18,8 @@ from .context import Budget, estimate, message_cost, system_prompt
 from .engine import Engine
 from .network import Cancelled, Client, Task, connect_local, model_context
 from .secrets import Vault
+from .i18n import LanguageManager, tr
+from .providers import load_providers, save_providers, validate_provider
 from .store import Store, data_dir
 
 STYLE = """
@@ -131,6 +133,11 @@ class Window(QMainWindow):
         self.store = store or Store()
         self.engine = Engine(self.store)
         self.vault = Vault(self.store.path.parent / "learning-key.dpapi")
+        self.profiles = load_providers(self.store)
+        self.provider_keys = {}
+        self.provider_edit_id = None
+        self.local_models = []
+        self.active_source = "local"
         self.job = None
         self.after_job = None
         self.streaming = ""
@@ -166,6 +173,12 @@ class Window(QMainWindow):
             nav.setCheckable(True)
             side.addWidget(nav)
             self.nav.append(nav)
+        side.addWidget(label("Language / 语言", "sideMuted"))
+        self.language_combo = QComboBox()
+        self.language_combo.addItem("简体中文", "zh_CN")
+        self.language_combo.addItem("English", "en")
+        self.language_combo.setProperty('_i18n_skip', True)
+        side.addWidget(self.language_combo)
         side.addSpacing(14)
         self.new_button = button("＋  新的对话", self.new_session)
         side.addWidget(self.new_button)
@@ -184,7 +197,7 @@ class Window(QMainWindow):
         content.addWidget(self.stack, 1)
         footer = QHBoxLayout()
         footer.setContentsMargins(24, 5, 24, 12)
-        self.status = label("所有主聊天均连接本机 Ollama。", "muted", True)
+        self.status = label("可连接本机 Ollama，或手动选择 API 供应商。", "muted", True)
         footer.addWidget(self.status, 1)
         self.stop_button = button("停止当前任务", self.stop)
         self.stop_button.setEnabled(False)
@@ -197,15 +210,52 @@ class Window(QMainWindow):
         self.build_memory()
         self.build_learning()
         self.build_connection()
+        self.refresh_sources()
         self.refresh_personas()
         self.refresh_sessions()
         self.refresh_memory()
         self.refresh_knowledge()
         self.render_chat()
         self.navigate(0)
+        self.prompt.setPlainText(self.store.get("draft:"+str(self.session_id), ""))
         self.update_counter()
-        if auto_connect:
+        for combo in [self.model_combo, self.persona_combo, self.persona_editor_combo, self.provider_picker]:
+            combo.setProperty('_i18n_user_items', True)
+        self.chat_source.setProperty('_i18n_routes', True)
+        self.learning_mode.setProperty('_i18n_routes', True)
+        self.i18n = LanguageManager(self, self.store.get('ui_language','zh_CN'), lambda lang:self.store.set('ui_language',lang))
+        self.language_combo.setCurrentIndex(max(0,self.language_combo.findData(self.i18n.language)))
+        self.language_combo.currentIndexChanged.connect(lambda: self.i18n.set_language(self.language_combo.currentData()))
+        self.i18n.changed.connect(self.language_changed)
+        self.i18n.apply()
+        saved = self.store.session(self.session_id).get("route_id", "local")
+        if saved != "local" and self.chat_source.findData(saved) >= 0:
+            self.restoring_session = True
+            try:
+                self.chat_source.setCurrentIndex(self.chat_source.findData(saved))
+            finally:
+                self.restoring_session = False
+        elif saved != "local":
+            self.connected = False
+            self.route_notice.setText("原供应商已删除。请重新选择供应商以新建会话。")
+        elif auto_connect:
             QTimer.singleShot(100, self.connect)
+
+    def save_reply_language(self):
+        self.store.set('response_language',self.reply_language.currentData())
+        self.update_counter()
+
+    def save_draft(self):
+        self.store.set("draft:"+str(self.session_id),self.prompt.toPlainText())
+
+    def language_changed(self, language):
+        blocked = self.language_combo.blockSignals(True)
+        self.language_combo.setCurrentIndex(self.language_combo.findData(language))
+        self.language_combo.blockSignals(blocked)
+        self.save_draft()
+        position = self.transcript.verticalScrollBar().value()
+        self.render_chat()
+        self.transcript.verticalScrollBar().setValue(position)
 
     def page(self, eyebrow, title, subtitle, scroll=True):
         body = QWidget()
@@ -253,6 +303,10 @@ class Window(QMainWindow):
                        self.persona_combo, self.connect_button, self.learn_button, self.analyze_button,
                        self.persona_save, self.profile_save, self.variant_button, self.provider_save]:
             widget.setEnabled(not busy)
+        for widget in [self.chat_source, self.provider_picker, self.provider_new, self.provider_delete]:
+            widget.setEnabled(not busy)
+        self.model_combo.setEnabled(not busy and self.engine.backend == "local")
+        self.variant_button.setEnabled(not busy and self.engine.backend == "local")
         self.stop_button.setEnabled(busy)
         self.update_counter()
         self.persona_counter()
@@ -268,7 +322,7 @@ class Window(QMainWindow):
             self.refresh_sessions()
             self.render_chat()
         elif kind == "retrieval":
-            self.retrieval.setText("知识参考：" + str(value))
+            self.retrieval.setText("知识参考：" + (tr(str(value)) if value == "本轮未命中黑话词条" else str(value)))
         else:
             self.status.setText(str(value))
 
@@ -301,6 +355,10 @@ class Window(QMainWindow):
     def build_chat(self):
         box = self.page("YOUR LOCAL COMPANION", "今天，想聊些什么？", "人格、长期记忆和学会的黑话，让每次对话都更贴近你。", False)
         row = QHBoxLayout()
+        self.chat_source = QComboBox()
+        self.chat_source.addItem("本机 Ollama", "local")
+        self.chat_source.currentIndexChanged.connect(self.change_source)
+        row.addWidget(self.chat_source, 1)
         self.model_combo = QComboBox()
         self.model_combo.setMinimumWidth(180)
         self.model_combo.setPlaceholderText("先一键连接模型")
@@ -311,6 +369,11 @@ class Window(QMainWindow):
         row.addWidget(self.persona_combo, 1)
         row.addWidget(button("删除会话", self.delete_session))
         box.addLayout(row)
+        source_row = QHBoxLayout()
+        self.route_notice = label("本机模式：聊天内容在本机处理。", "muted", True)
+        source_row.addWidget(self.route_notice, 1)
+        source_row.addWidget(button("管理 API 供应商", self.open_provider_settings))
+        box.addLayout(source_row)
         self.retrieval = label("知识参考：发送时自动检索已确认的词条。", "muted", True)
         box.addWidget(self.retrieval)
         self.transcript = QTextBrowser()
@@ -321,11 +384,15 @@ class Window(QMainWindow):
         self.prompt.setPlaceholderText("说点什么…  Shift / Enter 均可换行，点击发送开始对话")
         self.prompt.setMaximumHeight(110)
         self.prompt.textChanged.connect(self.update_counter)
+        self.draft_timer = QTimer(self)
+        self.draft_timer.setSingleShot(True)
+        self.draft_timer.timeout.connect(self.save_draft)
+        self.prompt.textChanged.connect(lambda:self.draft_timer.start(400))
         box.addWidget(self.prompt)
         self.counter = label("", "counter", True)
         box.addWidget(self.counter)
         row = QHBoxLayout()
-        self.auto_memory = QCheckBox("回复后用本机 AI 整理记忆候选")
+        self.auto_memory = QCheckBox("回复后用当前模型整理三维记忆")
         self.auto_memory.setChecked(bool(self.store.get("auto_memory", False)))
         self.auto_memory.toggled.connect(lambda value: self.store.set("auto_memory", value))
         row.addWidget(self.auto_memory, 1)
@@ -349,8 +416,25 @@ class Window(QMainWindow):
     def select_session(self, item, old=None):
         if not item or self.job:
             return
+        self.save_draft()
+        self.draft_timer.stop()
         self.session_id = item.data(Qt.ItemDataRole.UserRole)
-        persona_id = self.store.session(self.session_id)["persona_id"]
+        previous = self.prompt.blockSignals(True)
+        self.prompt.setPlainText(self.store.get("draft:"+str(self.session_id),""))
+        self.prompt.blockSignals(previous)
+        session = self.store.session(self.session_id)
+        source = session.get("route_id", "local")
+        target = self.chat_source.findData(source)
+        if target < 0:
+            self.connected = False
+            self.route_notice.setText("此会话原供应商已删除。请选择供应商并新建会话后再发送。")
+        elif source != self.active_source:
+            self.restoring_session = True
+            try:
+                self.chat_source.setCurrentIndex(target)
+            finally:
+                self.restoring_session = False
+        persona_id = session["persona_id"]
         self.persona_combo.blockSignals(True)
         self.persona_combo.setCurrentIndex(self.persona_combo.findData(persona_id))
         self.persona_combo.blockSignals(False)
@@ -362,8 +446,11 @@ class Window(QMainWindow):
     def new_session(self, checked=False, persona_id=None):
         if self.job:
             return
+        self.save_draft()
+        self.draft_timer.stop()
         ident = persona_id or self.persona_combo.currentData() or 1
-        self.session_id = self.store.new_session(ident)
+        self.session_id = self.store.new_session(ident, route_id=self.active_source)
+        self.connected = bool(self.engine.model)
         self.persona_combo.blockSignals(True)
         self.persona_combo.setCurrentIndex(self.persona_combo.findData(ident))
         self.persona_combo.blockSignals(False)
@@ -380,6 +467,9 @@ class Window(QMainWindow):
         self.store.delete_session(self.session_id)
         sessions = self.store.sessions()
         self.session_id = sessions[0]["id"] if sessions else self.store.new_session()
+        blocked = self.prompt.blockSignals(True)
+        self.prompt.setPlainText(self.store.get("draft:"+str(self.session_id), ""))
+        self.prompt.blockSignals(blocked)
         self.refresh_sessions()
         self.select_session(self.session_list.currentItem())
 
@@ -388,7 +478,7 @@ class Window(QMainWindow):
         content = []
         summary = self.store.session(self.session_id)["summary"]
         if summary:
-            content.append("<p style='color:#68877b'>已从上一会话携带摘要，完整记录仍保存在原会话。</p>")
+            content.append(tr("<p style='color:#68877b'>已从上一会话携带摘要，完整记录仍保存在原会话。</p>"))
         for row in rows:
             who = "你" if row["role"] == "user" else "助手"
             flag = "" if row["status"] in {"complete", "pending"} else " · 已中断"
@@ -398,7 +488,7 @@ class Window(QMainWindow):
         if self.streaming:
             content.append(self.bubble("助手 · 正在生成", self.streaming))
         if not content:
-            content.append("<div style='color:#7a9289;padding:45px 20px'><h2>在你的电脑上，慢慢聊。</h2><p>先连接 ModelDock 中已部署的模型，选一个人格，就可以开始了。</p><p>记忆和黑话在确认后，会自动成为下一轮对话的参考。</p></div>")
+            content.append(tr("<div style='color:#7a9289;padding:45px 20px'><h2>按你喜欢的方式，慢慢聊。</h2><p>连接本地模型或选择 API 供应商，选一个人格，就可以开始了。</p><p>记忆和黑话在确认后，会自动成为下一轮对话的参考。</p></div>"))
         self.transcript.setHtml("<body style='font-family:Microsoft YaHei UI;font-size:13px'>" + "".join(content) + "</body>")
         bar = self.transcript.verticalScrollBar()
         bar.setValue(bar.maximum())
@@ -407,7 +497,7 @@ class Window(QMainWindow):
     def bubble(who, text, user=False):
         bg = "#e0f0e7" if user else "#ffffff"
         value = html.escape(text).replace("\n", "<br>")
-        return f"<table width='100%' cellpadding='14' cellspacing='0' style='margin:8px 0;background:{bg};'><tr><td><b style='color:#397c67'>{html.escape(who)}</b><br><br>{value}</td></tr></table><br>"
+        return f"<table width='100%' cellpadding='14' cellspacing='0' style='margin:8px 0;background:{bg};'><tr><td><b style='color:#397c67'>{html.escape(tr(who))}</b><br><br>{value}</td></tr></table><br>"
 
     def update_counter(self):
         if not hasattr(self, "counter"):
@@ -416,11 +506,11 @@ class Window(QMainWindow):
             stats = self.engine.preview(self.session_id, self.prompt.toPlainText())
             warn = ""
             if stats["too_long"]:
-                warn = " ⚠ 单条输入超限，请缩短后发送。"
+                warn = tr(" ⚠ 单条输入超限，请缩短后发送。")
             elif stats["rollover"]:
-                warn = " ⚠ 历史将自动整理为摘要，并新开续聊会话。"
+                warn = tr(" ⚠ 历史将自动整理为摘要，并新开续聊会话。")
             elif stats["used"] > stats["limit"] * .85:
-                warn = " 接近上下文上限。"
+                warn = tr(" 接近上下文上限。")
             self.counter.setText(f"上下文 {self.engine.budget.context} · 输入保守估算 {stats['used']} / {stats['limit']} · 已预留回复 {self.engine.budget.reply}" + warn)
             self.counter.setStyleSheet("color:#bb6542;" if warn else "color:#537c72;")
             self.send_button.setEnabled(not self.job and self.connected and not stats["too_long"] and bool(self.prompt.toPlainText().strip()))
@@ -438,8 +528,10 @@ class Window(QMainWindow):
             self.error("单条消息超过当前模型的上下文预算，请缩短消息或调整上下文。原文已保留。")
             return
         if not self.connected:
-            self.error("请先一键连接本地模型。")
+            self.error("请先连接本地模型或配置聊天 API 供应商。")
             return
+        self.store.set("draft:"+str(self.session_id), "")
+        self.draft_timer.stop()
         self.last_sent = text
         self.pending_text = text
         self.streaming = ""
@@ -549,11 +641,11 @@ class Window(QMainWindow):
         row = QHBoxLayout()
         row.addWidget(label("长期记忆", "section"))
         row.addStretch()
-        self.analyze_button = button("用本地 AI 分析当前会话", self.analyze_memory)
+        self.analyze_button = button("用当前模型分析三维记忆", self.analyze_memory)
         row.addWidget(self.analyze_button)
         row.addWidget(button("手动添加", self.add_memory))
         box.addLayout(row)
-        self.memory_table = self.table(["记忆内容", "状态", "原文证据", "来源"])
+        self.memory_table = self.table(["概述", "评价 1–10", "分析", "状态", "原文证据"])
         box.addWidget(self.memory_table)
         row = QHBoxLayout()
         row.addWidget(button("确认选中记忆", lambda: self.approve_items("memories", self.memory_table)))
@@ -561,7 +653,7 @@ class Window(QMainWindow):
         row.addWidget(button("删除选中", lambda: self.delete_items("memories", self.memory_table)))
         row.addStretch()
         box.addLayout(row)
-        box.addWidget(label("记忆分析使用本地模型，不使用黑话学习的外部 API。删除会话不会自动删除已保存的独立记忆。", "muted", True))
+        box.addWidget(label("评分表示记忆的长期参考价值，不是对用户的评价。分析使用当前聊天模型；API 模式会把当前会话的用户消息发送给该供应商。候选确认后才参与聊天。", "muted", True))
         box.addStretch()
 
     @staticmethod
@@ -593,7 +685,7 @@ class Window(QMainWindow):
         return [table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole) for index in table.selectionModel().selectedRows()]
 
     def refresh_memory(self):
-        self.fill_table(self.memory_table, self.store.items("memories"), ["content", "status", "evidence", "source_session"])
+        self.fill_table(self.memory_table, self.store.items("memories"), ["summary", "score", "analysis", "status", "evidence"])
 
     def save_profile(self):
         text = self.user_profile.toPlainText().strip()
@@ -605,35 +697,49 @@ class Window(QMainWindow):
         self.status.setText("用户资料已保存。")
 
     def add_memory(self):
-        text, ok = QInputDialog.getMultiLineText(self, "手动记忆", "填写希望 AI 记住的事实或偏好：")
-        if ok and text.strip():
-            if estimate(text) > 500:
-                self.error("单条记忆请控制在 500 个 UTF-8 字节以内。")
-                return
-            self.store.add_memory(text, status="approved")
-            self.refresh_memory()
-            self.update_counter()
+        self.edit_memory(new=True)
 
-    def edit_memory(self):
+    def edit_memory(self, checked=False, new=False):
         ids = self.selected_ids(self.memory_table)
-        if len(ids) != 1:
+        if not new and len(ids) != 1:
             self.status.setText("请只选择一条记忆。")
             return
-        row = self.store.all("SELECT * FROM memories WHERE id=?", (ids[0],))[0]
-        text, ok = QInputDialog.getMultiLineText(self, "编辑记忆", "修改后需重新确认：", row["content"])
-        if ok and text.strip():
-            if estimate(text) > 500:
-                self.error("单条记忆请控制在 500 个 UTF-8 字节以内。")
-                return
-            self.store.execute("UPDATE memories SET content=?,status='pending' WHERE id=?", (text.strip(), ids[0]))
+        row = {} if new else self.store.all("SELECT * FROM memories WHERE id=?", (ids[0],))[0]
+        dialog = QDialog(self)
+        dialog.setWindowTitle("三维记忆 · 保存后待确认")
+        dialog.resize(560, 440)
+        form = QFormLayout(dialog)
+        score = QSpinBox()
+        score.setRange(1, 10)
+        score.setValue(row.get("score", 5))
+        summary, analysis = QPlainTextEdit(), QPlainTextEdit()
+        summary.setPlainText(row.get("summary", ""))
+        analysis.setPlainText(row.get("analysis", ""))
+        form.addRow("评价 1–10（长期参考价值）", score)
+        form.addRow("概述", summary)
+        form.addRow("分析与适用场景", analysis)
+        form.addRow("原文证据", label(row.get("evidence", "手动记忆"), "muted", True))
+        controls = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        controls.accepted.connect(dialog.accept)
+        controls.rejected.connect(dialog.reject)
+        form.addRow(controls)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            if new:
+                self.store.add_memory(summary.toPlainText(), score=score.value(), summary=summary.toPlainText(), analysis=analysis.toPlainText())
+            else:
+                self.store.update_memory(ids[0], summary.toPlainText(), score.value(), analysis.toPlainText())
             self.refresh_memory()
             self.update_counter()
+        except ValueError as exc:
+            self.error(str(exc))
 
     def analyze_memory(self):
         if self.job:
             return
         if not self.connected:
-            self.error("请先连接本地模型。")
+            self.error("请先连接模型或选择 API 供应商。")
             return
         ident = self.session_id
         self.run_job(lambda j: self.engine.analyze_memory(ident, j.task, j.event.emit),
@@ -664,7 +770,7 @@ class Window(QMainWindow):
         lab = QWidget()
         col = QVBoxLayout(lab)
         self.learning_mode = QComboBox()
-        self.learning_mode.addItems(["使用本机模型学习", "使用手动指定的提供商 API"])
+        self.learning_mode.addItem("跟随主聊天供应商（独立学习会话）", "active")
         col.addWidget(self.learning_mode)
         self.material = QPlainTextEdit()
         self.material.setPlaceholderText("粘贴黑话、释义、例句或圈内对话。例如：\nYYDS：永远的神，用来表达赞赏。\n这波操作真是 YYDS。")
@@ -681,6 +787,18 @@ class Window(QMainWindow):
         provider = QWidget()
         form = QFormLayout(provider)
         form.setSpacing(14)
+        self.provider_picker = QComboBox()
+        self.provider_picker.currentIndexChanged.connect(self.load_provider_editor)
+        form.addRow("已保存供应商", self.provider_picker)
+        actions = QHBoxLayout()
+        self.provider_new = button("新增供应商", self.new_provider)
+        self.provider_delete = button("删除当前供应商", self.delete_provider)
+        actions.addWidget(self.provider_new)
+        actions.addWidget(self.provider_delete)
+        form.addRow(actions)
+        self.provider_name = QLineEdit()
+        self.provider_name.setPlaceholderText("手动命名，如个人供应商、工作供应商")
+        form.addRow("供应商名称", self.provider_name)
         self.provider_base = QLineEdit(self.store.get("provider_base", ""))
         self.provider_base.setPlaceholderText("https://你的提供商/v1")
         self.provider_model = QLineEdit(self.store.get("provider_model", ""))
@@ -702,11 +820,20 @@ class Window(QMainWindow):
         form.addRow("模型 ID", self.provider_model)
         form.addRow("API Key", self.provider_key)
         form.addRow("提供商模型上下文", self.provider_context)
+        self.provider_stream = QCheckBox("启用聊天 SSE 流式输出")
+        self.provider_stream.setChecked(True)
+        form.addRow("", self.provider_stream)
+        self.provider_token_field = QComboBox()
+        self.provider_token_field.addItems(["max_tokens", "max_completion_tokens"])
+        form.addRow("输出预算参数", self.provider_token_field)
+        self.provider_reasoning = QComboBox()
+        self.provider_reasoning.addItems(["默认（不发送）", "none", "low", "medium", "high"])
+        form.addRow("reasoning_effort（按需）", self.provider_reasoning)
         form.addRow("", self.remember_key)
-        self.provider_save = button("保存学习 API 配置", self.save_provider, True)
+        self.provider_save = button("保存供应商（聊天 / 学习可选）", self.save_provider, True)
         form.addRow("", self.provider_save)
-        form.addRow(label("此 API 仅供黑话学习使用。使用 OpenAI 兼容的 /chat/completions；Base URL 通常以 /v1 结尾。上下文需按提供商模型说明填写，程序无法保证其声明值。", "muted", True))
-        tabs.addTab(provider, "学习提供商 API")
+        form.addRow(label("支持 OpenAI 兼容 /chat/completions。手动填写地址、模型和上下文，可保存多个供应商。主聊天 API 会接收人格、已确认记忆、知识和会话；学习 API 仅接收学习材料。", "muted", True))
+        tabs.addTab(provider, "聊天 / 学习供应商")
         library = QWidget()
         lib = QVBoxLayout(library)
         self.knowledge_table = self.table(["词语", "释义", "状态", "来源"])
@@ -741,27 +868,38 @@ class Window(QMainWindow):
         if not hasattr(self, "learning_limit") or not hasattr(self, "provider_context"):
             return
         count = estimate(self.material.toPlainText())
-        context = self.provider_context.value() if self.learning_mode.currentIndex() else self.engine.budget.context
-        size = max(100, min(5000, Budget(context, 1024).input_limit - 800))
-        self.learning_limit.setText(f"材料 {count} UTF-8 字节 · 独立上下文 {context} · 预计拆成 {max(1, (count + size - 1) // size)} 段。材料总量上限 200,000 字节。")
+        ident = self.learning_mode.currentData()
+        profile = next((p for p in self.profiles if p["id"] == ident), None)
+        context = profile["context"] if profile else (4096 if ident == "local" else self.engine.budget.context)
+        size = max(100, min(5000, Budget(context, 1024).input_limit - 1100))
+        self.learning_limit.setText(f"材料 {count} UTF-8 字节 · 独立上下文 {context} · 预计 {max(1, (count+size-1)//size)} 段 · 总量上限 200,000 字节。")
         self.learn_button.setEnabled(not self.job and 0 < count <= 200000)
 
     def provider(self):
-        base = self.provider_base.text().strip()
+        config = validate_provider({"id": self.provider_edit_id, "name": self.provider_name.text(),
+            "base": self.provider_base.text(), "model": self.provider_model.text(),
+            "context": self.provider_context.value(), "stream": self.provider_stream.isChecked(),
+            "token_field": self.provider_token_field.currentText(),
+            "reasoning": "" if self.provider_reasoning.currentIndex() == 0 else self.provider_reasoning.currentText()})
         key = self.provider_key.text().strip()
-        model = self.provider_model.text().strip()
-        Client(base, key)
-        if not model:
-            raise ValueError("请填写提供商模型 ID。")
-        return {"base": base, "key": key, "model": model, "context": self.provider_context.value()}
+        Client(config["base"], key)
+        return dict(config, key=key)
 
     def save_provider(self):
+        if self.job:
+            return
         try:
             config = self.provider()
-            for key in ("base", "model", "context"):
-                self.store.set("provider_" + key, config[key])
-            self.vault.save(config["key"] if self.remember_key.isChecked() else "")
-            self.status.setText("学习 API 配置已保存；主聊天继续使用本机模型。")
+            ident = config["id"]
+            self.provider_vault(ident).save(config["key"] if self.remember_key.isChecked() else "")
+            self.provider_keys[ident] = config["key"]
+            self.profiles = [p for p in self.profiles if p["id"] != ident] + [validate_provider(config)]
+            save_providers(self.store, self.profiles)
+            self.provider_edit_id = ident
+            self.refresh_sources()
+            if self.active_source == ident:
+                self.change_source()
+            self.status.setText("供应商已保存，可在主聊天和黑话学习分别选择。")
         except (ValueError, OSError, RuntimeError) as exc:
             self.error(str(exc))
 
@@ -773,14 +911,20 @@ class Window(QMainWindow):
             self.error("请提供不超过 200,000 字节的学习材料。")
             return
         try:
-            provider = self.provider() if self.learning_mode.currentIndex() else None
-            if provider is None and not self.connected:
-                raise ValueError("请先连接本机模型，或配置独立学习 API。")
-        except ValueError as exc:
+            source = self.learning_mode.currentData()
+            if source == "local":
+                provider = {"backend": "local", "model": self.engine.local_model or (self.local_models[0] if self.local_models else ""), "context": 4096}
+            elif source == "active":
+                provider = None
+                if not self.connected:
+                    raise ValueError("请先连接主聊天模型或选择独立学习供应商。")
+            else:
+                provider = self.provider_config(source)
+        except (ValueError, OSError, RuntimeError) as exc:
             self.error(str(exc))
             return
         def done(result):
-            self.status.setText(f"学习完成：{result['sessions']} 个独立对话，整理 {result['count']} 条候选。确认后提供给主 AI。")
+            self.status.setText(f"学习完成：{result['sessions']} 个独立对话，{result['count']} 条待确认词条。")
             self.learning_tabs.setCurrentIndex(2)
         self.run_job(lambda j: self.engine.learn(text, j.task, j.event.emit, provider), done, "learning")
 
@@ -859,8 +1003,153 @@ class Window(QMainWindow):
             self.run_job(lambda j: self.engine.create_variant(ident, name.strip(), j.task),
                 lambda result: self.status.setText(f"派生模型 {result} 已创建，可在其他 Ollama 客户端中选择。"), "variant")
 
+    def provider_vault(self, ident):
+        if ident == "legacy-learning":
+            return self.vault
+        return Vault(self.store.path.parent / ("provider-" + ident + ".dpapi"))
+
+    def provider_config(self, ident):
+        profile = next((p for p in self.profiles if p["id"] == ident), None)
+        if not profile:
+            raise ValueError("供应商不存在，请先保存配置。")
+        if ident not in self.provider_keys:
+            self.provider_keys[ident] = self.provider_vault(ident).load()
+        return dict(profile, key=self.provider_keys[ident])
+
+    def refresh_sources(self):
+        selected = self.chat_source.currentData() or "local"
+        learning = self.learning_mode.currentData() or "active"
+        self.chat_source.blockSignals(True)
+        self.chat_source.clear()
+        self.chat_source.addItem("本机 Ollama", "local")
+        self.learning_mode.blockSignals(True)
+        self.learning_mode.clear()
+        self.learning_mode.addItem("跟随主聊天供应商（独立会话）", "active")
+        self.learning_mode.addItem("本机 Ollama（独立会话）", "local")
+        self.provider_picker.blockSignals(True)
+        self.provider_picker.clear()
+        for profile in self.profiles:
+            ident, name = profile["id"], profile["name"]
+            self.chat_source.addItem(name, ident)
+            self.learning_mode.addItem(name, ident)
+            self.provider_picker.addItem(name, ident)
+        self.chat_source.setCurrentIndex(max(0, self.chat_source.findData(selected)))
+        self.learning_mode.setCurrentIndex(max(0, self.learning_mode.findData(learning)))
+        self.provider_picker.setCurrentIndex(max(0, self.provider_picker.findData(self.provider_edit_id)))
+        for combo in [self.chat_source, self.learning_mode, self.provider_picker]:
+            combo.blockSignals(False)
+        if self.profiles:
+            self.load_provider_editor()
+        else:
+            self.new_provider()
+        self.learning_counter()
+
+    def load_provider_editor(self):
+        ident = self.provider_picker.currentData()
+        if not ident:
+            return
+        try:
+            config = self.provider_config(ident)
+        except (OSError, RuntimeError) as exc:
+            self.status.setText("供应商密钥无法读取，请重新输入。")
+            config = dict(next(p for p in self.profiles if p["id"] == ident), key="")
+        self.provider_edit_id = ident
+        self.provider_name.setText(config["name"])
+        self.provider_base.setText(config["base"])
+        self.provider_model.setText(config["model"])
+        self.provider_key.setText(config["key"])
+        self.provider_context.setValue(config["context"])
+        self.provider_stream.setChecked(config["stream"])
+        self.provider_token_field.setCurrentText(config["token_field"])
+        self.provider_reasoning.setCurrentIndex(max(0, self.provider_reasoning.findText(config["reasoning"])))
+        self.remember_key.setChecked(self.provider_vault(ident).path.exists())
+
+    def new_provider(self):
+        if self.job:
+            return
+        self.provider_edit_id = None
+        self.provider_name.clear()
+        self.provider_base.clear()
+        self.provider_model.clear()
+        self.provider_key.clear()
+        self.provider_context.setValue(8192)
+        self.provider_stream.setChecked(True)
+        self.provider_token_field.setCurrentText("max_tokens")
+        self.provider_reasoning.setCurrentIndex(0)
+        self.remember_key.setChecked(False)
+
+    def delete_provider(self):
+        if self.job or not self.provider_edit_id:
+            return
+        ident = self.provider_edit_id
+        if QMessageBox.question(self, "删除供应商", "删除此供应商配置与本机保存的 Key？聊天记录保留。") != QMessageBox.StandardButton.Yes:
+            return
+        self.provider_vault(ident).save("")
+        self.provider_keys.pop(ident, None)
+        self.profiles = [p for p in self.profiles if p["id"] != ident]
+        save_providers(self.store, self.profiles)
+        self.provider_edit_id = None
+        was_active = self.active_source == ident
+        self.refresh_sources()
+        if was_active:
+            self.change_source()
+
+    def open_provider_settings(self):
+        self.navigate(3)
+        self.learning_tabs.setCurrentIndex(1)
+
+    def change_source(self):
+        if self.job:
+            return
+        ident = self.chat_source.currentData() or "local"
+        changed = ident != self.active_source
+        try:
+            if ident == "local":
+                self.engine.use_local(self.engine.local_model or (self.local_models[0] if self.local_models else ""))
+                self.connected = bool(self.engine.model)
+                self.model_combo.blockSignals(True)
+                self.model_combo.clear()
+                self.model_combo.addItems(self.local_models)
+                self.model_combo.setCurrentText(self.engine.model)
+                self.model_combo.blockSignals(False)
+                self.route_notice.setText("本机模式：聊天、记忆分析在本机处理。")
+                self.connection_badge.setText("● 本机模型" if self.connected else "○ 请一键连接本机模型")
+            else:
+                config = self.provider_config(ident)
+                self.engine.use_provider(config)
+                self.connected = True
+                self.model_combo.blockSignals(True)
+                self.model_combo.clear()
+                self.model_combo.addItem(config["model"])
+                self.model_combo.setCurrentIndex(0)
+                self.model_combo.blockSignals(False)
+                self.route_notice.setText("API 模式：人格、已确认记忆、检索词条和本会话将发送给 " + config["name"] + "。")
+                self.connection_badge.setText("API 已选择：" + config["name"])
+            self.active_source = ident
+            self.store.set("chat_source", ident)
+            if not getattr(self, "restoring_session", False):
+                if changed and self.store.messages(self.session_id):
+                    self.new_session()
+                else:
+                    self.store.execute("UPDATE sessions SET route_id=? WHERE id=?", (ident, self.session_id))
+            self.context_combo.blockSignals(True)
+            self.context_combo.clear()
+            choices = [n for n in [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144] if n <= self.engine.model_limit]
+            if self.engine.model_limit not in choices:
+                choices.append(self.engine.model_limit)
+            for value in sorted(choices):
+                self.context_combo.addItem(str(value), value)
+            self.context_combo.setCurrentIndex(self.context_combo.findData(self.engine.context))
+            self.context_combo.blockSignals(False)
+            self.model_info.setText("API 上下文按供应商配置值检查。" if ident != "local" else "本机模型上下文可通过一键连接刷新。")
+            self.set_busy(False)
+        except (ValueError, OSError, RuntimeError) as exc:
+            self.connected = False
+            self.status.setText("供应商配置不可用，请重新填写：" + str(exc))
+        self.update_counter()
+
     def build_connection(self):
-        box = self.page("COMPANION CONNECTION", "与 ModelDock，一键接上", "两个项目独立运行，通过标准本地 Ollama API 兼容。")
+        box = self.page("COMPANION CONNECTION", "与 ModelDock，一键接上", "可一键连接本地模型，也可在主聊天手动选择 API 供应商。")
         frame, col = card()
         col.addWidget(label("本地地址  http://127.0.0.1:11434", "section"))
         self.connect_button = button("一键连接 / 刷新 ModelDock 模型", self.connect, True)
@@ -877,6 +1166,16 @@ class Window(QMainWindow):
         col.addLayout(row)
         self.model_info = label("尚未读取模型上下文元数据。", "muted", True)
         col.addWidget(self.model_info)
+        reply_row = QHBoxLayout()
+        reply_row.addWidget(label("AI 回复语言"))
+        self.reply_language = QComboBox()
+        for title, value in [("跟随用户输入", "auto"), ("简体中文", "zh_CN"), ("English", "en")]:
+            self.reply_language.addItem(title, value)
+        self.reply_language.setCurrentIndex(max(0,self.reply_language.findData(self.store.get('response_language','auto'))))
+        self.reply_language.currentIndexChanged.connect(self.save_reply_language)
+        reply_row.addWidget(self.reply_language)
+        col.addLayout(reply_row)
+        col.addWidget(label("切换界面不会改写草稿、人格、记忆或回复语言偏好。" , "muted", True))
         col.addWidget(label("上下文越大，占用内存 / 显存越多。计数使用 UTF-8 字节保守估算与消息开销，不冒充模型精确 tokenizer；还会预留回复和安全空间。超长历史自动摘要续聊，单条超限会保留原文并阻止发送。", "muted", True))
         box.addWidget(frame)
         frame, col = card()
@@ -885,14 +1184,15 @@ class Window(QMainWindow):
         col.addWidget(button("查看主项目 ModelDock-Windows ↗", lambda: QDesktopServices.openUrl(QUrl(PARENT_URL))))
         col.addWidget(button("查看本 SUB 仓库 ↗", lambda: QDesktopServices.openUrl(QUrl("https://github.com/reaiksp/ModelDock-Chat"))))
         col.addWidget(label("本地数据目录：" + str(self.store.path.parent), "muted", True))
-        col.addWidget(label("主聊天、人格、记忆与学习材料保存在本机 SQLite。外部学习 API Key 可由 Windows DPAPI 加密保存；聊天数据库本身未加密。", "muted", True))
+        col.addWidget(label("主聊天、人格、记忆与学习材料保存在本机 SQLite。供应商 API Key 可由 Windows DPAPI 分别加密保存；聊天数据库本身未加密。", "muted", True))
         box.addWidget(frame)
         box.addStretch()
 
     def connect(self):
         if self.job:
             return
-        self.connected = False
+        if self.active_source == "local":
+            self.connected = False
         def done(result):
             names = result["models"]
             selected = self.store.get("model", "")
@@ -901,12 +1201,19 @@ class Window(QMainWindow):
                 selected = parent
             elif selected not in names:
                 selected = names[0] if names else ""
+            if self.active_source != "local":
+                self.local_models = names
+                self.engine.local_model = selected
+                self.status.setText("本机模型列表已刷新；主聊天仍使用选定 API。")
+                return
             self.model_combo.blockSignals(True)
             self.model_combo.clear()
             self.model_combo.addItems(names)
             self.model_combo.setCurrentText(selected)
             self.model_combo.blockSignals(False)
-            self.engine.model = selected
+            self.local_models = names
+            self.engine.local_model = selected
+            self.engine.use_local(selected)
             self.connected = bool(selected)
             self.connection_badge.setText("●  本地模型已连接" if names else "○  服务在线，尚无本地模型")
             self.connection_info.setText(f"发现 {len(names)} 个本地模型。当前：{selected or '请先在主项目部署模型'}")
@@ -918,13 +1225,16 @@ class Window(QMainWindow):
     def select_model(self, name):
         if self.job or not name:
             return
+        if self.engine.backend != "local":
+            return
         self.engine.model = name
+        self.engine.local_model = name
         self.connected = True
         self.store.set("model", name)
         self.read_model_info()
 
     def read_model_info(self):
-        if not self.engine.model or self.job:
+        if not self.engine.model or self.job or self.engine.backend != "local":
             return
         model = self.engine.model
         # Never retain another model's larger context after a switch or failed lookup.
@@ -966,6 +1276,8 @@ class Window(QMainWindow):
         self.update_counter()
 
     def closeEvent(self, event):
+        self.save_draft()
+        self.draft_timer.stop()
         if self.job:
             self.job.task.cancel()
         event.accept()

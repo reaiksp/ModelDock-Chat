@@ -157,6 +157,117 @@ class Client:
             raise RuntimeError("提供商响应不符合 OpenAI 兼容聊天格式。") from exc
 
 
+class OpenAIClient(Client):
+    """Shared Chat Completions adapter for chat, summaries, memories and learning."""
+    def __init__(self, config):
+        super().__init__(config["base"], config.get("key", ""))
+        self.stream = bool(config.get("stream", True))
+        self.token_field = config.get("token_field", "max_tokens")
+        self.reasoning = config.get("reasoning", "")
+        if self.token_field not in {"max_tokens", "max_completion_tokens"} or self.reasoning not in {"", "none", "low", "medium", "high"}:
+            raise ValueError("输出长度或推理参数无效。")
+
+    def body(self, model, messages, reply, stream):
+        body = {"model": model, "messages": messages, self.token_field: reply, "stream": stream}
+        if self.reasoning:
+            body["reasoning_effort"] = self.reasoning
+        return body
+
+    @staticmethod
+    def extract(result):
+        if not isinstance(result, dict) or result.get("error"):
+            raise RuntimeError("供应商返回错误，请检查模型、权限与配额。")
+        try:
+            choice = result["choices"][0]
+            content = choice["message"]["content"]
+            if isinstance(content, list):
+                content = "".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+            if not isinstance(content, str) or not content.strip():
+                raise RuntimeError("提供商返回空正文；请检查推理配置或增加回复预算。")
+            return content, choice.get("finish_reason")
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("提供商响应不符合 Chat Completions 格式。") from exc
+
+    def completion(self, model, messages, task, reply=1024):
+        content, reason = self.extract(self.request("/chat/completions", self.body(model, messages, reply, False), task))
+        if reason == "length":
+            raise RuntimeError("结构化输出被截断，请缩小材料后重试。")
+        return content
+
+    def chat(self, model, messages, task, emit, context=4096, reply=768, json_mode=False):
+        if json_mode or not self.stream:
+            content, reason = self.extract(self.request("/chat/completions", self.body(model, messages, reply, False), task))
+            if reason == "length":
+                if json_mode:
+                    raise RuntimeError("结构化输出被截断，请缩小材料后重试。")
+                content += "\n[达到本轮回复长度上限，可发送“继续”]"
+            task.check()
+            emit(content)
+            return content
+        conn = None
+        answer, finish, frame = "", None, []
+        try:
+            conn, response = self.open("/chat/completions", self.body(model, messages, reply, True), task)
+            if "application/json" in response.getheader("Content-Type", "").lower():
+                raw = response.read(8_000_001)
+                if len(raw) > 8_000_000:
+                    raise RuntimeError("提供商响应过大。")
+                task.check()
+                answer, finish = self.extract(json.loads(raw))
+                emit(answer)
+            else:
+                total = 0
+                while True:
+                    task.check()
+                    raw = response.readline(1_000_001)
+                    total += len(raw)
+                    if len(raw) > 1_000_000 or total > 8_000_000:
+                        raise RuntimeError("提供商响应过大。")
+                    line = raw.decode("utf-8-sig").rstrip("\r\n")
+                    if raw and line:
+                        if line.startswith("data:"):
+                            frame.append(line[5:].lstrip(" "))
+                        continue
+                    if frame:
+                        payload, frame = "\n".join(frame), []
+                        if payload == "[DONE]":
+                            if not answer.strip():
+                                raise RuntimeError("提供商返回空正文。")
+                            break
+                        data = json.loads(payload)
+                        if not isinstance(data, dict) or data.get("error"):
+                            raise RuntimeError("供应商流式生成失败，已生成内容已保留。")
+                        choice = next((c for c in (data.get("choices") or []) if c.get("index", 0) == 0), None)
+                        if choice:
+                            token = (choice.get("delta") or {}).get("content") or ""
+                            if not isinstance(token, str):
+                                raise RuntimeError("供应商流式正文格式无效。")
+                            if token:
+                                answer += token
+                                emit(token)
+                            finish = choice.get("finish_reason") or finish
+                    if not raw:
+                        if finish is None:
+                            raise RuntimeError("供应商流式连接提前结束，已生成内容已保留。")
+                        break
+            task.check()
+            if not answer.strip():
+                raise RuntimeError("提供商返回空正文。")
+            if finish == "length":
+                note = "\n[达到本轮回复长度上限，可发送“继续”]"
+                answer += note
+                emit(note)
+            return answer
+        except (OSError, ValueError, UnicodeError, http.client.HTTPException) as exc:
+            task.check()
+            raise RuntimeError("供应商连接或流式响应解析失败，请检查 API 配置。") from exc
+        finally:
+            if conn:
+                conn.close()
+            task.connection = None
+            task.socket = None
+
+
 def connect_local(task, log, data_path):
     client = Client()
     try:

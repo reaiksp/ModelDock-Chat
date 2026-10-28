@@ -39,6 +39,14 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id,id);
                 CREATE INDEX IF NOT EXISTS idx_knowledge_status ON knowledge(status);
             """)
+            if "route_id" not in {row[1] for row in db.execute("PRAGMA table_info(sessions)")}:
+                db.execute("ALTER TABLE sessions ADD COLUMN route_id TEXT NOT NULL DEFAULT 'local'")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(memories)")}
+            for name, declaration in [("score", "INTEGER NOT NULL DEFAULT 5 CHECK(score BETWEEN 1 AND 10)"),
+                                      ("summary", "TEXT NOT NULL DEFAULT ''"), ("analysis", "TEXT NOT NULL DEFAULT ''")]:
+                if name not in columns:
+                    db.execute(f"ALTER TABLE memories ADD COLUMN {name} {declaration}")
+            db.execute("UPDATE memories SET summary=content WHERE summary=''")
             if not db.execute("SELECT 1 FROM personas LIMIT 1").fetchone():
                 db.execute("INSERT INTO personas(name,prompt) VALUES (?,?)", ("温和搭子", DEFAULT_PERSONA))
                 db.execute("INSERT INTO personas(name,prompt) VALUES (?,?)", ("理性伙伴", "你是严谨、直接的中文讨论伙伴。区分事实与推测，指出逻辑漏洞，给出可执行的方案，不为了迎合用户而编造结论。"))
@@ -103,10 +111,10 @@ class Store:
             raise ValueError("会话不存在或已删除。")
         return rows[0]
 
-    def new_session(self, persona_id=1, title="新的对话", parent_id=None, summary=""):
+    def new_session(self, persona_id=1, title="新的对话", parent_id=None, summary="", route_id="local"):
         self.persona(persona_id)
-        return self.execute("INSERT INTO sessions(title,persona_id,parent_id,summary,created) VALUES (?,?,?,?,?)",
-                            (title, persona_id, parent_id, summary, time.time()))
+        return self.execute("INSERT INTO sessions(title,persona_id,parent_id,summary,created,route_id) VALUES (?,?,?,?,?,?)",
+                            (title, persona_id, parent_id, summary, time.time(), route_id))
 
     def messages(self, ident, complete_only=False):
         extra = " AND status='complete'" if complete_only else ""
@@ -118,16 +126,31 @@ class Store:
 
     def delete_session(self, ident):
         self.execute("DELETE FROM sessions WHERE id=?", (ident,))
+        self.execute("DELETE FROM settings WHERE key=?", ("draft:"+str(ident),))
 
-    def add_memory(self, content, kind="用户明确提供", evidence="", source_session=None, status="pending"):
+    def add_memory(self, content, kind="用户明确提供", evidence="", source_session=None, status="pending",
+                   score=5, summary=None, analysis=""):
         if not content.strip():
             raise ValueError("记忆内容不能为空。")
+        if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 10:
+            raise ValueError("记忆评分必须是 1–10 的整数。")
+        summary = content.strip() if summary is None else summary.strip()
+        if not summary or len(summary.encode()) > 800 or not isinstance(analysis, str) or len(analysis.encode()) > 1600:
+            raise ValueError("记忆概述不能为空且应简短；分析请控制在 1600 UTF-8 字节以内。")
         with self.db() as db:
             existing = db.execute("SELECT id FROM memories WHERE content=?", (content.strip(),)).fetchone()
             if existing:
                 return existing[0]
-            return db.execute("INSERT INTO memories(content,kind,evidence,source_session,status,created) VALUES (?,?,?,?,?,?)",
-                (content.strip(), kind, evidence, source_session, status, time.time())).lastrowid
+            return db.execute("INSERT INTO memories(content,kind,evidence,source_session,status,created,score,summary,analysis) VALUES (?,?,?,?,?,?,?,?,?)",
+                (content.strip(), kind, evidence, source_session, status, time.time(), score, summary, analysis)).lastrowid
+
+    def update_memory(self, ident, summary, score, analysis):
+        if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 10:
+            raise ValueError("记忆评分必须是 1–10 的整数。")
+        if not summary.strip() or len(summary.encode()) > 800 or len(analysis.encode()) > 1600:
+            raise ValueError("记忆概述或分析长度无效。")
+        self.execute("UPDATE memories SET content=?,summary=?,score=?,analysis=?,status='pending' WHERE id=?",
+                     (summary.strip(), summary.strip(), score, analysis.strip(), ident))
 
     def add_knowledge(self, term, definition, example="", aliases="", source="手动", status="pending"):
         if not term.strip() or not definition.strip():

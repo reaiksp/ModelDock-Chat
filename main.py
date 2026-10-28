@@ -25,9 +25,11 @@ def main():
     if smoke:
         path = Path(sys.argv[sys.argv.index("--smoke-test") + 1])
         def check():
+            window.i18n.set_language("en")
+            window.i18n.apply()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps({"startup": "passed", "frozen": bool(getattr(sys, "frozen", False)),
-                "pages": window.stack.count(), "independent_database": True,
+                "pages": window.stack.count(), "english_ui": "Chat" in window.nav[0].text(), "independent_database": True,
                 "input_limit": window.engine.budget.input_limit}, indent=2), "utf-8")
             window.close()
             app.quit()

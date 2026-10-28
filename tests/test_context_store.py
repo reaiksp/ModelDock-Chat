@@ -39,7 +39,7 @@ def test_memory_candidate_requires_approval_and_deduplicates(store):
     assert a == b
     assert retrieve(store, "hello")[0] == []
     store.approve("memories", [a])
-    assert retrieve(store, "hello")[0] == ["喜欢简洁回答"]
+    assert retrieve(store, "hello")[0] == [{"score": 5, "summary": "喜欢简洁回答", "analysis": ""}]
 
 
 def test_import_validates_entire_file_before_writing(store):

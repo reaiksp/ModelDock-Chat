@@ -3,7 +3,8 @@ import re
 import time
 
 from .context import Budget, clip, estimate, message_cost, retrieve, split_text, system_prompt
-from .network import Cancelled, Client, create_variant
+from .network import Cancelled, Client, OpenAIClient, create_variant
+from .i18n import response_policy, adapt_user_message
 
 
 def parse_object(text):
@@ -27,6 +28,27 @@ class Engine:
         self.model = ""
         self.context = 4096
         self.model_limit = 4096
+        self.backend = "local"
+        self.provider_name = "本机 Ollama"
+        self.local_model = ""
+
+    def use_provider(self, config):
+        self.client = OpenAIClient(config)
+        self.model = config["model"]
+        self.context = self.model_limit = int(config["context"])
+        self.backend = "api"
+        self.provider_name = config.get("name", "自定义 API")
+
+    def use_local(self, model=""):
+        self.client = Client()
+        self.model = model or self.local_model
+        self.local_model = self.model
+        self.context = self.model_limit = 4096
+        self.backend = "local"
+        self.provider_name = "本机 Ollama"
+
+    def system_prompt(self, persona, memories=(), knowledge=(), summary=""):
+        return system_prompt(persona, memories, knowledge, summary, self.store.get('response_language','auto'))
 
     @property
     def budget(self):
@@ -47,12 +69,12 @@ class Engine:
 
     def preview(self, session_id, text):
         session, persona, memories, knowledge = self.prompt_data(session_id, text)
-        system = system_prompt(persona, memories, knowledge, session["summary"])
-        single = [{"role": "system", "content": system}, {"role": "user", "content": text}]
+        system = self.system_prompt(persona, memories, knowledge, session["summary"])
+        single = [{"role": "system", "content": system}, {"role": "user", "content": adapt_user_message(text,self.store.get("response_language","auto"))}]
         history = self.history(session_id)
         used = message_cost(single[:1] + history + single[1:])
         # A continuation can replace the old summary with a smaller summary.
-        minimal = [{"role": "system", "content": system_prompt(persona, memories, knowledge)}, single[1]]
+        minimal = [{"role": "system", "content": self.system_prompt(persona, memories, knowledge)}, single[1]]
         single_used = message_cost(minimal)
         return {"used": used, "limit": self.budget.input_limit, "single": single_used,
                 "remaining": max(0, self.budget.input_limit - single_used),
@@ -79,24 +101,24 @@ class Engine:
 
     def chat(self, session_id, text, task, emit):
         if not self.model:
-            raise ValueError("请先一键连接并选择本地模型。")
+            raise ValueError("请先连接本地模型或选择有效的聊天供应商。")
         task.check()
         session, persona, memories, knowledge = self.prompt_data(session_id, text)
         history = self.history(session_id)
-        base = system_prompt(persona, memories, knowledge)
-        single = [{"role": "system", "content": base}, {"role": "user", "content": text}]
+        base = self.system_prompt(persona, memories, knowledge)
+        single = [{"role": "system", "content": base}, {"role": "user", "content": adapt_user_message(text,self.store.get("response_language","auto"))}]
         self.budget.require(single)
         summary = session["summary"]
-        messages = [{"role": "system", "content": system_prompt(persona, memories, knowledge, summary)}] + history + single[1:]
+        messages = [{"role": "system", "content": self.system_prompt(persona, memories, knowledge, summary)}] + history + single[1:]
         if not self.budget.check(messages)[0]:
             allowance = min(600, self.budget.input_limit - message_cost(single) - 180)
             if allowance < 100:
                 raise ValueError("单条消息虽可容纳，但没有续聊摘要空间。请再缩短消息或人格提示词。")
             summary = self.summarize(history, summary, task, emit, allowance)
             task.check()
-            messages = [{"role": "system", "content": system_prompt(persona, memories, knowledge, summary)}, single[1]]
+            messages = [{"role": "system", "content": self.system_prompt(persona, memories, knowledge, summary)}, single[1]]
             self.budget.require(messages)
-            session_id = self.store.new_session(session["persona_id"], session["title"][:25] + " · 续聊", session_id, summary)
+            session_id = self.store.new_session(session["persona_id"], session["title"][:25] + " · 续聊", session_id, summary, route_id=session.get("route_id", "local"))
         task.check()
         user_id = self.store.add_message(session_id, "user", text, "pending")
         if not self.store.messages(session_id)[:-1] and not self.store.session(session_id)["parent_id"]:
@@ -129,30 +151,37 @@ class Engine:
         rows = [m for m in self.store.messages(session_id, True) if m["role"] == "user"]
         if not rows:
             raise ValueError("当前会话没有可分析的完整用户消息。")
-        instruction = ('分析用户明确表达的长期偏好、目标或自述事实。不要猜测身份、健康或心理状态。'
-            '只返回 JSON：{"memories":[{"content":"简短记忆","kind":"偏好或自述事实","evidence":"用户原文中的连续引用"}]}。没有则返回空列表。')
+        instruction = ('提取用户明确表达的长期偏好、目标或自述事实，不猜测身份、健康或心理状态。'
+            '每条记忆有三个维度：score 为长期参考价值评分（1–10整数，10最高，不是评价用户）；summary 为事实概述；analysis 简述原文依据及未来使用场景，不能增加原文未支持的推断。'
+            '只返回 JSON：{"memories":[{"score":7,"summary":"喜欢简短回答","analysis":"用户明确表达回答风格，可用于调整回复长度。","evidence":"用户原文中的连续引用"}]}。没有则返回空列表。')
+        instruction += "\n" + response_policy(self.store.get("response_language","auto"))
         text = "\n".join(m["content"] for m in rows)
-        chunks = split_text(text, max(200, self.budget.input_limit - estimate(instruction) - 200))
+        analysis_budget = Budget(self.budget.context, reply=min(768,max(256,self.budget.context//4)))
+        chunks = split_text(text, analysis_budget.input_limit - estimate(instruction) - 160)
         count = 0
         for i, chunk in enumerate(chunks):
             task.check()
-            emit("status", f"本地记忆分析 {i + 1}/{len(chunks)}…")
+            emit("status", f"{self.provider_name} · 三维记忆分析 {i + 1}/{len(chunks)}…")
             messages = [{"role": "system", "content": instruction}, {"role": "user", "content": chunk}]
-            self.budget.require(messages)
+            analysis_budget.require(messages)
             result = parse_object(self.client.chat(self.model, messages, task, lambda _: None,
-                self.budget.context, 768, json_mode=True))
+                analysis_budget.context, analysis_budget.reply, json_mode=True))
             records = result.get("memories", [])
             if not isinstance(records, list):
                 raise ValueError("记忆分析结果格式错误。")
             for row in records[:20]:
                 if not isinstance(row, dict):
                     continue
-                content, evidence = row.get("content"), row.get("evidence")
+                content, evidence = row.get("summary", row.get("content")), row.get("evidence")
+                score, analysis = row.get("score", 5), row.get("analysis", "")
                 if not isinstance(content, str) or not isinstance(evidence, str) or not content.strip() or not evidence.strip():
                     continue
                 if evidence not in chunk or estimate(content) > 800:
                     continue
-                self.store.add_memory(content, "AI 候选 · 需确认", evidence, session_id)
+                if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 10 or not isinstance(analysis, str) or estimate(analysis) > 1600:
+                    continue
+                self.store.add_memory(content, "AI 候选 · 需确认", evidence, session_id,
+                                      score=score, summary=content, analysis=analysis)
                 count += 1
         return count
 
@@ -161,26 +190,35 @@ class Engine:
             '如果材料明确给出新造词的定义，也应按材料原意收录，不要求该词已经流行。'
             '返回 JSON：{"entries":[{"term":"词语","definition":"语境下含义","example":"例句","aliases":"别名,缩写"}]}。'
             '每段最多提取 12 条，释义保持简短。没有可靠词条则返回空列表。')
+        instruction += "\nPreserve original terms, quotations and examples. Write definitions in the language requested by the user, otherwise the language of the learning material."
+        local_only = bool(provider and provider.get("backend") == "local")
         context = int(provider["context"]) if provider else self.budget.context
-        budget = Budget(context, reply=1024)
+        if local_only:
+            model = provider.get("model") or self.local_model
+            if not model:
+                raise ValueError("请先刷新本机模型列表，或选择其他学习供应商。")
+            learning_client = Client()
+            name = "本机 Ollama"
+        elif provider:
+            model, name = provider["model"], provider.get("name", provider["base"])
+            learning_client = OpenAIClient(provider)
+        else:
+            model, name, learning_client = self.model, self.provider_name, self.client
+            if not model:
+                raise ValueError("请先选择聊天模型或独立学习供应商。")
+        budget = Budget(context, reply=min(1024,max(256,context//4)))
         room = min(5000, budget.input_limit - estimate(instruction) - 200)
         chunks = split_text(material, room)
         count = 0
         for i, chunk in enumerate(chunks):
             task.check()
             emit("status", f"黑话学习 · 独立对话 {i + 1}/{len(chunks)}")
-            name = provider["base"] if provider else "本机 Ollama"
-            model = provider["model"] if provider else self.model
             ident = self.store.execute("INSERT INTO learning(provider,model,input,created) VALUES (?,?,?,?)",
                                       (name, model, chunk, time.time()))
             try:
                 messages = [{"role": "system", "content": instruction}, {"role": "user", "content": chunk}]
                 budget.require(messages)
-                if provider:
-                    client = Client(provider["base"], provider["key"])
-                    raw = client.completion(model, messages, task, 1024)
-                else:
-                    raw = self.client.chat(model, messages, task, lambda _: None, context, 1024, json_mode=True)
+                raw = learning_client.chat(model, messages, task, lambda _: None, context, budget.reply, json_mode=True)
                 task.check()
                 data = parse_object(raw)
                 records = data.get("entries")
@@ -211,9 +249,11 @@ class Engine:
             raise ValueError("请先确认至少一个黑话词条。")
         # Personal memories and user profile are deliberately excluded from the model derivative.
         entries = [{k: row[k] for k in ("term", "definition", "example")} for row in knowledge]
-        prompt = system_prompt(self.store.persona(persona_id)["prompt"], knowledge=entries)
+        prompt = self.system_prompt(self.store.persona(persona_id)["prompt"], knowledge=entries)
         self.budget.require([{"role": "system", "content": prompt}, {"role": "user", "content": " " * 256}])
         return prompt
 
     def create_variant(self, persona_id, name, task):
+        if self.backend != "local":
+            raise ValueError("派生模型仅支持本机 Ollama，请先切换主聊天到本机模型。")
         return create_variant(self.client, self.model, name, self.variant_prompt(persona_id), task, self.budget.context)

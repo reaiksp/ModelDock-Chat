@@ -1,3 +1,25 @@
+# ModelDock Chat 0.2.0 · Windows x64 测试版
+
+## 本次更新
+
+- MD / MDC 均支持应用内中英文切换；MDC 保存分会话草稿，并将回复语言偏好与界面语言分离。用户原始输入、人格和记忆不被翻译改写。
+
+- 主聊天支持多个手动配置的 OpenAI 兼容 API 供应商，提供 SSE 流式与普通 JSON 模式、输出预算参数和可选推理参数。
+- 主聊天与黑话学习可分别选择供应商；黑话也可跟随主聊天，但始终使用独立学习请求，不带主聊天或个人记忆。
+- 长期记忆扩展为评价 1–10（长期参考价值）、概述、分析；支持编辑、审核和按评分优先检索。
+- 旧记忆数据自动迁移，保留原记录、证据与审批状态；旧学习 API 配置和 DPAPI 密钥继续兼容。
+- 会话记录供应商关联，切换供应商时开启独立会话。
+- 新增英文 README，并与中文互链；保留独立 SUB 声明、主项目链接与 Codex 署名。
+
+## 验证
+
+- 56 项自动测试通过，覆盖旧数据库迁移、供应商选择与密钥隔离、SSE 注释 / 多行 / Unicode / 取消、三维评分验证及学习数据隔离。
+- 通过本机 Ollama 的真实兼容 API 完成聊天、三维记忆、黑话学习及检索回答联调。
+- 未使用真实第三方 API 账户或额度验证供应商服务；支持的是 Chat Completions 兼容协议，不是所有供应商原生协议。
+- 包仍是未签名测试版，需在干净 Windows 环境验收。API 模式下选定供应商会接收当前会话、人格、资料、已确认记忆与检索知识；详情见双语 README。
+
+---
+
 # ModelDock Chat 0.1.0 · Windows x64 测试版
 
 独立 SUB 仓库：[ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat)。主项目：[ModelDock-Windows](https://github.com/reaiksp/ModelDock-Windows)。开发协作：OpenAI Codex。
