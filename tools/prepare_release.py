@@ -7,7 +7,7 @@ root = Path(__file__).resolve().parents[1]
 target = root / "dist/ModelDockChat"
 licenses = target / "licenses"
 licenses.mkdir(parents=True, exist_ok=True)
-for name in ["PySide6", "PySide6-Essentials", "shiboken6", "pyinstaller"]:
+for name in ["PySide6", "PySide6-Essentials", "shiboken6", "psutil", "pyinstaller"]:
     dist = importlib.metadata.distribution(name)
     folder = licenses / name
     folder.mkdir(exist_ok=True)

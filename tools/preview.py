@@ -28,12 +28,15 @@ window.model_combo.setCurrentIndex(0)
 window.model_combo.blockSignals(False)
 window.connection_badge.setText("●  本地模型已连接 · 演示数据")
 window.retrieval.setText("知识参考：YYDS · 已确认词条")
+from chatdock.hardware import Hardware
+window.speech.scanned(Hardware(32, 25, 16, 100, 100, "Demo NVIDIA GPU"))
+window.speech.mode.setCurrentIndex(1)
 window.ensurePolished()
 window.centralWidget().setGeometry(window.rect())
 window.layout().activate()
 output = Path(__file__).resolve().parents[1] / "artifacts"
 output.mkdir(exist_ok=True)
-pages = [(0, "chat-preview.png"), (1, "persona-preview.png"), (2, "memory-preview.png"), (3, "learning-preview.png"), (3, "provider-preview.png"), (0, "chat-en.png"), (2, "memory-en.png"), (3, "provider-en.png")]
+pages = [(0, "chat-preview.png"), (1, "persona-preview.png"), (2, "memory-preview.png"), (3, "learning-preview.png"), (3, "provider-preview.png"), (0, "chat-en.png"), (2, "memory-en.png"), (3, "provider-en.png"), (5, "speech-preview.png"), (5, "speech-en.png")]
 
 def capture(i=0):
     index, name = pages[i]

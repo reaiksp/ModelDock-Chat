@@ -18,11 +18,34 @@ Typed input, personalities, provider/model names and memory records retain their
 
 ## Get started
 
-Extract the complete Windows x64 portable package and run `ModelDockChat.exe`. Keep `_internal` next to the executable. Packaged users do not need Python.
+Extract the complete Windows x64 portable package and run `ModelDockChat.exe`. Keep `_internal` next to the executable. Basic chat does not require Python. Optional speech deployment needs a separate Python 3.12 installation.
 
-For local chat, deploy a text model through MD or your own Ollama installation, then use MDC's one-click local connection. MDC reads MD's selected model preference without modifying MD settings.
+For local chat, install [Ollama](https://ollama.com/download/windows), then detect hardware and download a recommended text model in MDC's Voice & deployment page. Existing MD / Ollama models remain compatible. MDC restores its own selected model first and can read MD's preference during initial setup without modifying MD settings.
 
 For API chat, open **Manage API providers** from the chat page (also available in the slang page's provider tab). Add a named provider, then manually enter its Base URL, model ID, API key and context capacity. Save the profile and select it in the main chat provider dropdown. Multiple profiles can be saved and selected independently for chat and slang learning.
+
+## Local readout and joint deployment (0.3.0)
+
+This update lives entirely in **MDC**; MD does not need an update. A separate local Python process runs Qwen3-TTS and exposes an authenticated loopback interface. Ollama remains the text engine.
+
+1. Open **Voice & deployment**, detect hardware and compare text-only and text-with-voice plans. Choose chat/coding use and speed/balanced/quality preference.
+2. The default is **Qwen3-TTS 1.7B CustomVoice**. 0.6B and automatic pairing are also available. Automatic quality mode prefers a feasible 1.7B pairing; other modes weigh the remaining text-model budget.
+3. For cloud API text chat, select “Use API text chat; run only speech locally”. This affects recommendation budgets only; select the actual provider in main chat.
+4. Enable voice, select a Python 3.12 executable (source runs can detect it; packaged runs can use Python Launcher), choose ModelScope or Hugging Face, then install the isolated runtime and model. Initial downloads require internet, time and disk space. Cancelled downloads can be retried; failed installation is never reported as complete. An existing official `torch-2.11.0+cu128-cp312-cp312-win_amd64.whl` can be reused to avoid another large download; it still installs into the isolated environment.
+5. Start/connect the speech service. The model loads on first readout. Select a voice, readout language and optional style instruction. **Only 1.7B supports style instructions.** Playback speed is adjusted by the player.
+6. Click **Read this reply** under a completed AI message, read the latest reply or selected chat text. Segmented generation supports playback, pause, stop, optional automatic readout and regeneration. Completed segments survive failure; choose a previous run to replay, or regenerate the message.
+
+![Voice and joint deployment; demo hardware data](docs/images/speech-en.png)
+
+Resource estimates assume Q4 text models at 4K context. Speech reservations are 4 GiB VRAM / 4 GiB RAM for 0.6B and 7 GiB VRAM / 5 GiB RAM for 1.7B, in addition to system headroom. Disk checks reserve space for model weights, dependencies and downloads, and combine text/speech needs on the same drive. These are conservative planning budgets, not official minimum requirements or speed guarantees. Managed speech deployment currently targets NVIDIA CUDA GPU index 0 with CUDA 12.8 PyTorch; GPU memory is never combined across cards or with shared RAM. CPU text inference remains supported, but concurrent CPU TTS is not recommended. Already-loaded models reduce measured free memory; stop unused models and detect again. Longer chat contexts cost more memory. Recommendations do not silently replace manually selected chat models.
+
+The isolated runtime is under `%LOCALAPPDATA%/ModelDockChat/speech`; audio cache is under `speech_audio`. Speech dependencies do not enter the chat application's environment. Stopping a managed service releases its resources. Disabling voice or closing its owning MDC instance stops that service.
+
+Original user input, replies, persona prompts and memories stay unchanged. Markdown/code cleanup and literal `term=reading` pronunciation entries apply only to a readout copy. Manually add confirmed slang pronunciations; this does not change model weights or automatically trust learned pronunciations. Full persona prompts are not sent to TTS: enter a short instruction under Voice style preference. Voice, language, style, playback speed and pronunciations persist independently of UI language.
+
+Quality reviews are separate from user-memory scores. Objective checks report segment duration, generation time, low-amplitude sample ratio and clipping ratio; these do not measure semantic accuracy or naturalness. After listening, rate accuracy/naturalness/clarity from 1 to 10 and add a summary and analysis. This version has no ASR back-check or automatic naturalness scoring. Audio and reviews remain local. Clear audio cache without deleting text/reviews; deleting a chat session deletes linked speech text/reviews, while leftover audio can be cleared separately.
+
+Official sources: [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), [1.7B CustomVoice](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice), [0.6B CustomVoice](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice). Official model cards specify Apache-2.0. Speech weights, PyTorch and CUDA are downloaded separately and are not bundled in the portable application.
 
 ## Provider compatibility
 
@@ -95,3 +118,10 @@ Build output includes a portable directory, ZIP, SHA256, dynamic Qt libraries, l
 ## Ollama and protocol references
 
 MDC is an independent project, not an official Ollama client. Ollama and model weights are installed separately and governed by their own licenses. References: [Ollama CLI](https://github.com/ollama/ollama), [Ollama chat API](https://docs.ollama.com/api/chat), [model creation](https://docs.ollama.com/api/create), [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/), [OpenRouter streaming](https://openrouter.ai/docs/api_reference/streaming).
+
+
+## Voice validation notes
+
+The default 1.7B model generated two Chinese PCM WAV segments locally on an RTX 5080 using PyTorch 2.11.0 CUDA 12.8 and SDPA. Audio durations were 3.84s and 2.56s; the first request, including cold model loading, took 66.61s, and the next segment took 3.55s. Objective checks found no near-silence or clipping warning. This is not a listening-based accuracy or naturalness score. 0.6B has interface/resource coverage but has not undergone a real-weight inference acceptance run. Windows audio-handle cleanup is regression-tested to prevent WinError 32 on exit. This remains an unsigned test build.
+
+To repeat actual synthesis, install development requirements and run `python tools/speech_smoke.py --root artifacts/voice-test --install --size 1.7B --source modelscope`. Optionally pass `--torch-wheel` with an existing official PyTorch wheel. This command downloads large dependencies/models only when `--install` is specified, uses an isolated test environment and stops its service afterward.

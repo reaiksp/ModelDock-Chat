@@ -22,6 +22,7 @@ class Task:
         self.event = threading.Event()
         self.connection = None
         self.socket = None
+        self.process = None
 
     def check(self):
         if self.event.is_set():
@@ -29,6 +30,19 @@ class Task:
 
     def cancel(self):
         self.event.set()
+        process = self.process
+        if process and process.poll() is None:
+            try:
+                import psutil
+                parent = psutil.Process(process.pid)
+                for child in reversed(parent.children(recursive=True)):
+                    try:
+                        child.terminate()
+                    except psutil.Error:
+                        pass
+                process.terminate()
+            except (OSError, psutil.Error):
+                pass
         conn = self.connection
         sock = self.socket or (conn.sock if conn else None)
         if sock:
@@ -279,7 +293,7 @@ def connect_local(task, log, data_path):
             candidate = Path(os.getenv("LOCALAPPDATA", "")) / "Programs/Ollama/ollama.exe"
             cli = str(candidate) if candidate.is_file() else None
         if not cli:
-            raise RuntimeError("未找到 Ollama。请先在 ModelDock 中部署模型，再点击一键连接。")
+            raise RuntimeError("未找到 Ollama。请安装 Ollama，再在 MDC 的语音与部署页面下载模型，或复用 ModelDock。")
         env = os.environ.copy()
         env["OLLAMA_HOST"] = "127.0.0.1:11434"
         if not env.get("OLLAMA_MODELS") and os.name == "nt":

@@ -167,7 +167,7 @@ class Window(QMainWindow):
         side.addWidget(label("CHAT / 独立聊天 SUB", "sideMuted"))
         side.addSpacing(18)
         self.nav = []
-        for i, title in enumerate(["◌   聊天主页", "✧   人格工作室", "▤   记忆与用户", "◇   黑话学习", "⌘   连接设置"]):
+        for i, title in enumerate(["◌   聊天主页", "✧   人格工作室", "▤   记忆与用户", "◇   黑话学习", "⌘   连接设置", "♫   语音与部署"]):
             nav = button(title, lambda checked=False, index=i: self.navigate(index))
             nav.setObjectName("nav")
             nav.setCheckable(True)
@@ -210,6 +210,7 @@ class Window(QMainWindow):
         self.build_memory()
         self.build_learning()
         self.build_connection()
+        self.build_speech()
         self.refresh_sources()
         self.refresh_personas()
         self.refresh_sessions()
@@ -241,6 +242,21 @@ class Window(QMainWindow):
         elif auto_connect:
             QTimer.singleShot(100, self.connect)
 
+    def build_speech(self):
+        from .speech_ui import SpeechPanel
+        box = self.page("LOCAL VOICE / DEPLOYMENT", "语音与部署", "在 MDC 中部署语音模型，比较纯文字与文字加语音方案。")
+        self.speech = SpeechPanel(self)
+        box.addWidget(self.speech)
+        box.addStretch()
+
+    def speech_link(self, url):
+        if url.scheme() == "speech":
+            try:
+                ident = int(url.path())
+            except ValueError:
+                return
+            self.speech.read_message(ident)
+
     def save_reply_language(self):
         self.store.set('response_language',self.reply_language.currentData())
         self.update_counter()
@@ -256,6 +272,9 @@ class Window(QMainWindow):
         position = self.transcript.verticalScrollBar().value()
         self.render_chat()
         self.transcript.verticalScrollBar().setValue(position)
+        if self.speech.hw:
+            self.speech.scanned(self.speech.hw)
+        self.speech.show_quality()
 
     def page(self, eyebrow, title, subtitle, scroll=True):
         body = QWidget()
@@ -289,6 +308,8 @@ class Window(QMainWindow):
             return
         self.after_job = None
         self.job_kind = kind
+        if kind == "chat":
+            self.chat_succeeded = False
         self.job = Job(fn)
         self.job.event.connect(self.job_event)
         if success:
@@ -299,6 +320,8 @@ class Window(QMainWindow):
         QTimer.singleShot(0, self.job.start)
 
     def set_busy(self, busy):
+        if hasattr(self, "speech"):
+            self.speech.busy(busy)
         for widget in [self.new_button, self.session_list, self.model_combo, self.context_combo,
                        self.persona_combo, self.connect_button, self.learn_button, self.analyze_button,
                        self.persona_save, self.profile_save, self.variant_button, self.provider_save]:
@@ -313,6 +336,9 @@ class Window(QMainWindow):
         self.learning_counter()
 
     def job_event(self, kind, value):
+        if kind.startswith("speech_"):
+            self.speech.handle_event(kind, value)
+            return
         if kind == "token":
             self.streaming += value
             self.render_chat()
@@ -327,12 +353,16 @@ class Window(QMainWindow):
             self.status.setText(str(value))
 
     def job_failed(self, message):
+        if self.job_kind == "speech_generate":
+            self.speech.failed()
         self.after_job = None
         self.status.setText(message)
         if self.job_kind == "chat" and not self.prompt.toPlainText():
             self.prompt.setPlainText(self.last_sent)
 
     def job_finished(self):
+        if self.job_kind == "chat" and getattr(self, "chat_succeeded", False):
+            self.speech.auto_request(self.session_id)
         callback = self.after_job
         self.after_job = None
         self.job = None
@@ -345,8 +375,13 @@ class Window(QMainWindow):
         self.refresh_knowledge()
         if callback:
             QTimer.singleShot(0, callback)
+        QTimer.singleShot(50, self.speech.maybe_auto)
 
     def stop(self):
+        if hasattr(self, "speech"):
+            self.speech.pending_auto = None
+        if hasattr(self, "speech") and self.job and self.job_kind == "speech_generate":
+            self.speech.stop_reading()
         if self.job:
             self.job.task.cancel()
             self.stop_button.setEnabled(False)
@@ -378,6 +413,7 @@ class Window(QMainWindow):
         box.addWidget(self.retrieval)
         self.transcript = QTextBrowser()
         self.transcript.setOpenLinks(False)
+        self.transcript.anchorClicked.connect(self.speech_link)
         self.transcript.setMinimumHeight(180)
         box.addWidget(self.transcript, 1)
         self.prompt = QPlainTextEdit()
@@ -416,6 +452,7 @@ class Window(QMainWindow):
     def select_session(self, item, old=None):
         if not item or self.job:
             return
+        self.speech.stop_reading()
         self.save_draft()
         self.draft_timer.stop()
         self.session_id = item.data(Qt.ItemDataRole.UserRole)
@@ -446,6 +483,7 @@ class Window(QMainWindow):
     def new_session(self, checked=False, persona_id=None):
         if self.job:
             return
+        self.speech.stop_reading()
         self.save_draft()
         self.draft_timer.stop()
         ident = persona_id or self.persona_combo.currentData() or 1
@@ -483,6 +521,8 @@ class Window(QMainWindow):
             who = "你" if row["role"] == "user" else "助手"
             flag = "" if row["status"] in {"complete", "pending"} else " · 已中断"
             content.append(self.bubble(who + flag, row["content"], row["role"] == "user"))
+            if row["role"] == "assistant" and row["status"] == "complete":
+                content.append(f"<p><a href='speech:{row['id']}'>{html.escape(tr('朗读这条回复'))}</a></p>")
         if self.pending_text:
             content.append(self.bubble("你", self.pending_text, True))
         if self.streaming:
@@ -538,6 +578,7 @@ class Window(QMainWindow):
         self.prompt.clear()
         ident = self.session_id
         def done(session_id):
+            self.chat_succeeded = True
             self.session_id = session_id
             self.status.setText("回复完成。")
             if self.auto_memory.isChecked():
@@ -1154,7 +1195,7 @@ class Window(QMainWindow):
         col.addWidget(label("本地地址  http://127.0.0.1:11434", "section"))
         self.connect_button = button("一键连接 / 刷新 ModelDock 模型", self.connect, True)
         col.addWidget(self.connect_button, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.connection_info = label("连接后自动读取主项目上次选择的模型；没有主项目偏好时选择已安装模型。", "muted", True)
+        self.connection_info = label("优先恢复 MDC 已选模型；首次使用时兼容读取主项目的模型偏好。", "muted", True)
         col.addWidget(self.connection_info)
         row = QHBoxLayout()
         row.addWidget(label("主聊天上下文"))
@@ -1180,7 +1221,7 @@ class Window(QMainWindow):
         box.addWidget(frame)
         frame, col = card()
         col.addWidget(label("独立 SUB 项目", "section"))
-        col.addWidget(label("ModelDock 负责部署模型；ModelDock Chat 负责对话、人格、记忆和黑话知识。双方使用独立源码、仓库、配置与数据目录。", "muted", True))
+        col.addWidget(label("ModelDock Chat 是独立 SUB，提供对话、人格、记忆、黑话和本地语音部署；仍兼容 ModelDock 的 Ollama 文字模型。双方使用独立仓库和数据目录。", "muted", True))
         col.addWidget(button("查看主项目 ModelDock-Windows ↗", lambda: QDesktopServices.openUrl(QUrl(PARENT_URL))))
         col.addWidget(button("查看本 SUB 仓库 ↗", lambda: QDesktopServices.openUrl(QUrl("https://github.com/reaiksp/ModelDock-Chat"))))
         col.addWidget(label("本地数据目录：" + str(self.store.path.parent), "muted", True))
@@ -1197,10 +1238,8 @@ class Window(QMainWindow):
             names = result["models"]
             selected = self.store.get("model", "")
             parent = result["parent_model"]
-            if parent in names:
-                selected = parent
-            elif selected not in names:
-                selected = names[0] if names else ""
+            if selected not in names:
+                selected = parent if parent in names else (names[0] if names else "")
             if self.active_source != "local":
                 self.local_models = names
                 self.engine.local_model = selected
@@ -1216,8 +1255,8 @@ class Window(QMainWindow):
             self.engine.use_local(selected)
             self.connected = bool(selected)
             self.connection_badge.setText("●  本地模型已连接" if names else "○  服务在线，尚无本地模型")
-            self.connection_info.setText(f"发现 {len(names)} 个本地模型。当前：{selected or '请先在主项目部署模型'}")
-            self.status.setText("本地连接完成。" if names else "请先到 ModelDock 部署一个文字模型。")
+            self.connection_info.setText(f"发现 {len(names)} 个本地模型。当前：{selected or '请先下载文字模型'}")
+            self.status.setText("本地连接完成。" if names else "请到语音与部署页面下载文字模型，或使用已有 ModelDock 模型。")
             if selected:
                 self.after_job = self.read_model_info
         self.run_job(lambda j: connect_local(j.task, lambda text: j.event.emit("status", text), self.store.path.parent), done, "connect")
@@ -1280,4 +1319,5 @@ class Window(QMainWindow):
         self.draft_timer.stop()
         if self.job:
             self.job.task.cancel()
+        self.speech.shutdown()
         event.accept()

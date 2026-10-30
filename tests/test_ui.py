@@ -22,8 +22,8 @@ def window(app, tmp_path):
     win.close()
 
 
-def test_window_has_five_independent_pages(window):
-    assert window.stack.count() == 5
+def test_window_has_six_independent_pages(window):
+    assert window.stack.count() == 6
     assert window.learning_tabs.count() == 3
     assert "保守估算" in window.counter.text()
 
@@ -168,3 +168,47 @@ def test_draft_restores_after_restart_and_reply_language_is_independent(window):
         assert other.reply_language.currentData()=='en'
     finally:
         other.close()
+
+
+def test_voice_language_switch_and_restart_preserve_user_preferences(window, app):
+    from chatdock.ui import Window
+    panel = window.speech
+    panel.mode.setCurrentIndex(1)
+    panel.variant.setCurrentIndex(panel.variant.findData("1.7B"))
+    panel.style.setText("温柔地说，保留我的语气")
+    panel.dictionary.setPlainText("yyds=永远的神")
+    panel.language.setCurrentIndex(panel.language.findData("Chinese"))
+    assert panel.save()
+    from chatdock.hardware import Hardware
+    panel.scanned(Hardware(32,25,16,100,100))
+    window.i18n.set_language("en")
+    window.i18n.apply()
+    assert "Text:" in panel.with_voice.text()
+    assert panel.usage.currentText() == "General chat"
+    assert "Voice" in window.nav[5].text()
+    assert panel.mode.currentData() is True
+    assert panel.variant.currentData() == "1.7B"
+    assert panel.style.text() == "温柔地说，保留我的语气"
+    assert panel.dictionary.toPlainText() == "yyds=永远的神"
+    window.close()
+    reopened = Window(window.store, auto_connect=False)
+    assert reopened.speech.style.text() == "温柔地说，保留我的语气"
+    assert reopened.speech.language.currentData() == "Chinese"
+    reopened.close()
+
+
+def test_failed_chat_does_not_auto_read_previous_reply(window):
+    window.store.add_message(window.session_id, "assistant", "上一轮的旧回复")
+    window.speech.mode.setCurrentIndex(1)
+    window.speech.auto.setChecked(True)
+    window.job_kind = "chat"
+    window.chat_succeeded = False
+    window.job_finished()
+    assert window.speech.pending_auto is None
+
+
+def test_switching_conversation_clears_queued_voice(window):
+    window.speech.pending_auto = (window.session_id, 123)
+    window.speech.queue = ["not-played.wav"]
+    window.new_session()
+    assert window.speech.pending_auto is None and window.speech.queue == []
