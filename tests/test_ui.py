@@ -212,3 +212,20 @@ def test_switching_conversation_clears_queued_voice(window):
     window.speech.queue = ["not-played.wav"]
     window.new_session()
     assert window.speech.pending_auto is None and window.speech.queue == []
+
+
+def test_import_md_plan_keeps_user_content_and_clamps_later(window,tmp_path,monkeypatch):
+    import json
+    root=tmp_path/"ModelDock"
+    root.mkdir()
+    (root/"settings.json").write_text(json.dumps({"model":"qwen3:1.7b","model_plans":{"qwen3:1.7b":{"model":"qwen3:1.7b","context":16384,"capacity":"context","voice":"1.7B"}}}),encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA",str(tmp_path))
+    monkeypatch.setattr(window,"connect",lambda:None)
+    window.prompt.setPlainText("我的草稿保持原样")
+    before=window.store.persona(1)["prompt"]
+    window.import_md_plan()
+    assert window.store.get("model_contexts")["qwen3:1.7b"]==16384
+    assert window.speech.capacity.currentData()=="context"
+    assert window.speech.variant.currentData()=="1.7B"
+    assert window.prompt.toPlainText()=="我的草稿保持原样"
+    assert window.store.persona(1)["prompt"]==before

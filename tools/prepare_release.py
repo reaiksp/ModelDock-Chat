@@ -27,6 +27,6 @@ source = target / "source"
 source.mkdir(exist_ok=True)
 for name in ["chatdock", "tools", "tests", "licenses", "assets", "docs"]:
     shutil.copytree(root / name, source / name, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
-for name in ["main.py", "requirements.txt", "requirements-dev.txt", "build.ps1", "README.md", "README.en.md", "THIRD_PARTY_NOTICES.md", "RELEASE_NOTES.md"]:
+for name in ["pytest.ini", "main.py", "requirements.txt", "requirements-dev.txt", "build.ps1", "README.md", "README.en.md", "THIRD_PARTY_NOTICES.md", "RELEASE_NOTES.md"]:
     shutil.copy2(root / name, source / name)
 print("Portable release prepared with license notices and source.")

@@ -1195,6 +1195,7 @@ class Window(QMainWindow):
         col.addWidget(label("本地地址  http://127.0.0.1:11434", "section"))
         self.connect_button = button("一键连接 / 刷新 ModelDock 模型", self.connect, True)
         col.addWidget(self.connect_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        col.addWidget(button("应用 MD 部署方案（模型、上下文、语音预算）", self.import_md_plan))
         self.connection_info = label("优先恢复 MDC 已选模型；首次使用时兼容读取主项目的模型偏好。", "muted", True)
         col.addWidget(self.connection_info)
         row = QHBoxLayout()
@@ -1228,6 +1229,32 @@ class Window(QMainWindow):
         col.addWidget(label("主聊天、人格、记忆与学习材料保存在本机 SQLite。供应商 API Key 可由 Windows DPAPI 分别加密保存；聊天数据库本身未加密。", "muted", True))
         box.addWidget(frame)
         box.addStretch()
+
+    def import_md_plan(self):
+        import os
+        try:
+            path=Path(os.getenv("LOCALAPPDATA",str(Path.home()/".local/share")))/"ModelDock/settings.json"
+            settings=json.loads(path.read_text("utf-8"))
+            model=settings.get("model","")
+            plan=settings.get("model_plans",{}).get(model,{})
+            context=plan.get("context")
+            if not model or context not in {4096,16384} or plan.get("model")!=model:
+                raise ValueError("MD 尚无完整部署方案，请先成功部署模型。")
+            contexts=self.store.get("model_contexts",{})
+            contexts[model]=context
+            self.store.set("model_contexts",contexts)
+            self.store.set("model",model)
+            self.speech.capacity.setCurrentIndex(self.speech.capacity.findData(plan.get("capacity","large")))
+            voice=plan.get("voice","off")
+            if voice in {"0.6B","1.7B"}:
+                self.speech.variant.setCurrentIndex(self.speech.variant.findData(voice))
+                self.speech.mode.setCurrentIndex(1)
+            else:
+                self.speech.mode.setCurrentIndex(0)
+            self.speech.save()
+            self.connect()
+        except (OSError,ValueError,TypeError) as exc:
+            self.error(str(exc))
 
     def connect(self):
         if self.job:
@@ -1286,7 +1313,7 @@ class Window(QMainWindow):
         self.model_info.setText("正在读取模型元数据；未识别时保守按 4096。")
         def done(limit):
             self.engine.model_limit = limit
-            requested = int(self.store.get("context", 4096))
+            requested = int(self.store.get("model_contexts",{}).get(model,self.store.get("context", 4096)))
             options = [x for x in [2048, 4096, 8192, 16384, 32768] if x <= limit]
             if not options:
                 options = [limit]
@@ -1309,6 +1336,9 @@ class Window(QMainWindow):
             return
         value = min(self.context_combo.currentData(), self.engine.model_limit)
         self.engine.context = value
+        contexts=self.store.get("model_contexts",{})
+        contexts[self.engine.model]=value
+        self.store.set("model_contexts",contexts)
         self.store.set("context", value)
         self.persona_counter()
         self.learning_counter()

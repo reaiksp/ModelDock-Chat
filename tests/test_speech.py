@@ -224,3 +224,13 @@ def test_app_smoke_releases_audio_before_windows_temp_cleanup(tmp_path):
     data = json.loads(report.read_text())
     assert data["startup"] == "passed" and data["pages"] == 6
     assert data["audio_backend_loaded"] and data["speech_bridge_bundled"]
+
+
+@pytest.mark.parametrize("voice",[False,True])
+def test_long_context_keeps_voice_reserve(voice):
+    hw=Hardware(32,25,16,100,100)
+    large=recommend(hw,voice,"1.7B",preference="quality",capacity="large")
+    long=recommend(hw,voice,"1.7B",preference="quality",capacity="context")
+    assert long["context"]==16384 and large["context"]==4096
+    assert long["memory"]<large["memory"]
+    assert long["memory"]+long["context_reserve"]+long["reserve_gpu"]<=16-16*.12

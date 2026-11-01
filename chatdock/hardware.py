@@ -70,12 +70,14 @@ def detect(data_path):
                     free_disk(data_path), free_disk(ollama_models_dir()), gpu)
 
 
-def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced", same_disk=True, remote_text=False):
+def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced", same_disk=True, remote_text=False, capacity="large"):
     """Never sum VRAM with RAM or different GPUs. No unsupported CPU TTS recommendation."""
     ram = max(0, min(hw.ram - max(3, hw.ram * .2), hw.available - 1))
     gpu = max(0, hw.vram - max(1, hw.vram * .12))
     sizes = ([size] if size in VOICE_MODELS else
              (["1.7B", "0.6B"] if preference == "quality" else ["0.6B", "1.7B"])) if voice else [None]
+    context = 16384 if capacity == "context" else 4096
+    extra = 4.0 if context > 4096 and not remote_text else 0
     plans = []
     for variant in sizes:
         reserve = VOICE_MODELS[variant] if variant else {"gpu": 0, "ram": 0, "disk": 0}
@@ -84,12 +86,12 @@ def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced",
         use_gpu = gpu >= 1.6 and ram >= 2
         budget = (gpu - reserve["gpu"]) if use_gpu else ram
         if not use_gpu and preference != "quality":
-            budget = min(budget, 3.2 if preference == "speed" else 5)
+            budget = min(budget, (3.2 if preference == "speed" else 5) + extra)
         for tag, download, memory in ([("API", 0, 0)] if remote_text else TEXT_MODELS.get(usage, TEXT_MODELS["chat"])):
             required = download * 1.15 + 1 + ((reserve["disk"] + 12) if variant and same_disk else 0)
-            if memory <= budget and (remote_text or hw.model_disk >= required):
+            if memory + extra <= budget and (remote_text or hw.model_disk >= required):
                 plans.append({"text": tag, "voice": variant, "memory": memory,
-                    "budget": round(budget, 1), "reserve_gpu": reserve["gpu"],
+                    "budget": round(budget, 1), "context": context, "context_reserve":extra, "reserve_gpu": reserve["gpu"],
                     "reserve_ram": reserve["ram"], "device": "cuda:0" if variant else None,
                     "mode": "GPU" if use_gpu else "CPU", "download": download})
     if not plans:

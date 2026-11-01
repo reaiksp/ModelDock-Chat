@@ -45,6 +45,7 @@ class SpeechPanel(QWidget):
         note = QLabel("全部功能独立运行于 MDC。开启语音会为 Qwen3-TTS 预留资源，再选择文字模型；估算不保证实际速度。")
         note.setWordWrap(True)
         box.addWidget(note)
+        self.button("录音克隆与训练支持说明 ↗", lambda:__import__('PySide6.QtGui',fromlist=['QDesktopServices']).QDesktopServices.openUrl(QUrl("https://github.com/reaiksp/ModelDock-Chat/blob/main/docs/SPEECH_CAPABILITIES.md")), box)
         self.tabs = QTabWidget()
         box.addWidget(self.tabs)
         deployment = QWidget()
@@ -78,6 +79,11 @@ class SpeechPanel(QWidget):
             self.preference.addItem(label, value)
         self.preference.setCurrentIndex(max(0, self.preference.findData(self.settings.get("preference", "quality"))))
         form.addRow("推荐偏好", self.preference)
+        self.capacity = QComboBox()
+        for title,value in [("大体量 · 4K 上下文","large"),("大上下文 · 16K","context")]:
+            self.capacity.addItem(title,value)
+        self.capacity.setCurrentIndex(max(0,self.capacity.findData(self.settings.get("capacity","large"))))
+        form.addRow("容量模式",self.capacity)
         box.addLayout(form)
         self.hardware = QLabel("点击检测，比较开语音与不开语音两套方案。")
         self.hardware.setWordWrap(True)
@@ -213,7 +219,7 @@ class SpeechPanel(QWidget):
         box.addWidget(self.history)
         box.addStretch()
         self.refresh_history()
-        for combo in [self.variant, self.usage, self.preference]:
+        for combo in [self.variant, self.usage, self.preference, self.capacity]:
             combo.currentIndexChanged.connect(self.update_recommendations)
         self.remote_text.toggled.connect(self.update_recommendations)
         self.mode.currentIndexChanged.connect(self.mode_changed)
@@ -236,7 +242,7 @@ class SpeechPanel(QWidget):
 
     def snapshot(self):
         return {"enabled": self.mode.currentData(), "variant": self.variant.currentData(),
-            "usage": self.usage.currentData(), "preference": self.preference.currentData(),
+            "capacity": self.capacity.currentData(), "usage": self.usage.currentData(), "preference": self.preference.currentData(),
             "remote_text": self.remote_text.isChecked(),
             "python": self.python_path.text().strip(), "source": self.source.currentData(),
             "torch_wheel": self.torch_wheel.text().strip(),
@@ -259,7 +265,7 @@ class SpeechPanel(QWidget):
     def busy(self, value):
         for widget in [self.scan_button, self.text_deploy, self.install_button, self.start_button,
                        self.stop_service_button, self.read_button, self.selection_button,
-                       self.mode, self.variant, self.usage, self.preference, self.source, self.history, self.remote_text]:
+                       self.mode, self.variant, self.usage, self.preference, self.source, self.history, self.remote_text, self.capacity]:
             widget.setEnabled(not value)
 
     def scan(self):
@@ -277,13 +283,13 @@ class SpeechPanel(QWidget):
             return None
         same_disk = self.service.root.resolve().anchor.lower() == ollama_models_dir().resolve().anchor.lower()
         return recommend(self.hw, voice, self.variant.currentData(), self.usage.currentData(),
-                         self.preference.currentData(), same_disk, self.remote_text.isChecked())
+                         self.preference.currentData(), same_disk, self.remote_text.isChecked(), self.capacity.currentData())
 
     def describe(self, plan):
         if not plan:
             return tr("当前配置没有安全的同时运行推荐。请释放资源，或使用 API 文字聊天。")
         voice = "Qwen3-TTS " + plan["voice"] if plan["voice"] else tr("不开语音")
-        return tr("文字：{0} · 语音：{1} · 文字预算 {2} GiB · 为语音预留显存 {3} GiB / 内存 {4} GiB").format(
+        return str(plan["context"]) + " tokens · " + tr("文字：{0} · 语音：{1} · 文字预算 {2} GiB · 为语音预留显存 {3} GiB / 内存 {4} GiB").format(
             plan["text"], voice, plan["budget"], plan["reserve_gpu"], plan["reserve_ram"])
 
     def update_recommendations(self):
@@ -368,6 +374,9 @@ class SpeechPanel(QWidget):
             run_command([cli, "pull", plan["text"]], job.task, lambda text:job.event.emit("speech_status",text), env=env)
             return plan["text"]
         def done(tag):
+            contexts=self.store.get("model_contexts",{})
+            contexts[tag]=plan["context"]
+            self.store.set("model_contexts",contexts)
             self.store.set("model", tag)
             self.window.engine.local_model = tag
             self.info.setText(tr("文字模型下载完成，请在连接设置刷新并选择。"))

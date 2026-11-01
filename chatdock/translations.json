@@ -475,5 +475,21 @@
   "静音比例偏高": "High silence ratio",
   "削波比例偏高": "High clipping ratio",
   "本地命令失败，请检查网络、Python 与磁盘空间。\n{0}": "Local command failed. Check network, Python and disk space.\n{0}",
-  "发生错误：{0}": "An error occurred: {0}"
+  "发生错误：{0}": "An error occurred: {0}",
+  "大体量": "Larger model",
+  "大上下文": "Longer context",
+  "资源不足": "Insufficient resources",
+  "大体量 · 4K 上下文": "Larger model · 4K context",
+  "大上下文 · 16K": "Longer context · 16K",
+  "不开语音 / API 语音": "Voice off / cloud speech",
+  "本地语音 0.6B": "Local speech 0.6B",
+  "本地语音 1.7B": "Local speech 1.7B",
+  "容量模式": "Capacity mode",
+  "打开配套聊天 MDC ↗": "Open companion MDC ↗",
+  "应用 MD 部署方案（模型、上下文、语音预算）": "Apply MD model, context and speech plan",
+  "MD 尚无完整部署方案，请先成功部署模型。": "No complete MD deployment plan. Deploy successfully first.",
+  "录音克隆与训练支持说明 ↗": "Voice cloning and training support ↗",
+  "输入消息…（上下文按所选部署方案配置）": "Message… (context follows deployment plan)",
+  "语音与文字同时运行资源不足。": "Insufficient resources for simultaneous speech and text.",
+  "模型元数据不能确认所选上下文；请使用较小上下文。": "Model metadata cannot confirm this context; choose a smaller context."
 }
