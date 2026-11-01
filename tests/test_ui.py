@@ -229,3 +229,26 @@ def test_import_md_plan_keeps_user_content_and_clamps_later(window,tmp_path,monk
     assert window.speech.variant.currentData()=="1.7B"
     assert window.prompt.toPlainText()=="我的草稿保持原样"
     assert window.store.persona(1)["prompt"]==before
+
+
+def test_md_import_stops_owned_speech_before_connecting(window,tmp_path,monkeypatch):
+    import json
+    root=tmp_path/"ModelDock"
+    root.mkdir()
+    (root/"settings.json").write_text(json.dumps({"model":"qwen3:8b","model_plans":{"qwen3:8b":{"model":"qwen3:8b","context":16384,"capacity":"context","voice":"off"}}}),encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA",str(tmp_path))
+    window.speech.mode.setCurrentIndex(1)
+    window.speech.service.owned=True
+    calls=[]
+    monkeypatch.setattr(window,"connect",lambda:calls.append("connect"))
+    monkeypatch.setattr(window.speech.service,"stop",lambda:calls.append("stop"))
+    def run(fn,done,kind):
+        assert kind=="speech_stop"
+        fn(None)
+        done(None)
+    monkeypatch.setattr(window,"run_job",run)
+    window.import_md_plan()
+    assert calls==["stop"]
+    window.after_job()
+    assert calls==["stop","connect"]
+    window.speech.service.owned=False

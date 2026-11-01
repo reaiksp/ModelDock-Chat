@@ -1246,13 +1246,20 @@ class Window(QMainWindow):
             self.store.set("model",model)
             self.speech.capacity.setCurrentIndex(self.speech.capacity.findData(plan.get("capacity","large")))
             voice=plan.get("voice","off")
+            blocked=self.speech.mode.blockSignals(True)
             if voice in {"0.6B","1.7B"}:
                 self.speech.variant.setCurrentIndex(self.speech.variant.findData(voice))
                 self.speech.mode.setCurrentIndex(1)
             else:
                 self.speech.mode.setCurrentIndex(0)
+            self.speech.mode.blockSignals(blocked)
+            self.speech.update_recommendations()
             self.speech.save()
-            self.connect()
+            if voice not in {"0.6B","1.7B"} and self.speech.service.owned:
+                self.speech.stop_reading()
+                self.run_job(lambda job:self.speech.service.stop(), lambda result:setattr(self,"after_job",self.connect), "speech_stop")
+            else:
+                self.connect()
         except (OSError,ValueError,TypeError) as exc:
             self.error(str(exc))
 
