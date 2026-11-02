@@ -77,7 +77,7 @@ def test_conversation_demand_has_exact_context_and_reserve(demand):
 def test_context_demand_never_automatically_shrinks_to_fit():
     assert recommend(hw(12), usage="compressed", compression_level=5, conversation_demand=5) is None
     plan = recommend(hw(24), usage="compressed", compression_level=5, conversation_demand=5)
-    assert plan["context"] == 32768 and plan["effective_compression_level"] == 2
+    assert plan["context"] == 10240 and plan["effective_compression_level"] == 2
     assert recommend(hw(16), voice=True, size="0.6B", usage="compressed", compression_level=5, conversation_demand=4) is None
 
 
@@ -94,7 +94,7 @@ def test_cpu_budget_and_noncompressed_choices_remain_honest():
     assert plan["mode"] == "CPU" and plan["quantization"] == "BF16"
     ordinary = recommend(hw(16), usage="chat", compression_level=5, conversation_demand=5)
     assert ordinary["compression_level"] is None and ordinary["effective_compression_level"] == 0
-    assert ordinary["context"] == 32768
+    assert ordinary["context"] == 10240
 
 
 def test_remote_speech_plan_does_not_claim_provider_context_or_full_precision():
@@ -162,7 +162,7 @@ def test_legacy_capacity_migrates_and_new_settings_restore(app, tmp_path):
     store=Store(tmp_path/"old.db");store.set("speech",{"capacity":"context","speaker":"Serena","instruct":"保留语气","custom_future":{"keep":True}})
     win=Window(store,auto_connect=False)
     try:
-        assert win.speech.conversation_slider.value()==4
+        assert win.speech.conversation_slider.value()==5
         assert win.speech.compression_slider.value()==3
         assert win.speech.style.text()=="保留语气"
         win.speech.conversation_slider.setValue(3)
@@ -187,4 +187,4 @@ def test_only_successful_explicit_deployment_records_model_demand(window, monkey
     assert callbacks[0][1]=="text_deploy"
     callbacks[0][0]("normalized-installed-model")
     assert window.store.get("model_demands")=={"other":1,"normalized-installed-model":4}
-    assert window.store.get("model_contexts")["normalized-installed-model"]==16384
+    assert window.store.get("model_contexts")["normalized-installed-model"]==8192

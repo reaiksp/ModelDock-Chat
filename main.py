@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from chatdock.store import Store, data_dir
 from chatdock.ui import STYLE, Window
 from chatdock.i18n import tr
+from chatdock.context_levels import CONVERSATION_CONTEXTS
 
 
 def main():
@@ -61,6 +62,7 @@ def main():
                 "private_memory_controls": "Preview" in window.personal_preview.text(),
                 "private_memory_default_off": not window.personal_auto.isChecked(),
                 "input_limit": window.engine.budget.input_limit,
+                "context_levels": list(CONVERSATION_CONTEXTS.values()),
                 "compression_steps": [window.speech.compression_slider.minimum(), window.speech.compression_slider.maximum()],
                 "conversation_steps": [window.speech.conversation_slider.minimum(), window.speech.conversation_slider.maximum()],
                 "explicit_download_control": bool(window.speech.text_deploy.text())}, indent=2), "utf-8")

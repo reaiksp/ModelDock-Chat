@@ -1,5 +1,7 @@
 # ModelDock Chat (MDC)
 
+上下文五档：2K / 4K / 6K / 8K / 10K；已部署方案保持原上下文。 / Context levels:2K /4K /6K /8K /10K. Existing deployed plans retain their context.
+
 New parameter-cap slider:0.5B–48B in0.5B steps, selecting corresponding quantized variants. [说明 / Details](docs/PARAMETER_RANGE.md)
 
 [简体中文](README.md) | **English**
@@ -8,11 +10,11 @@ New parameter-cap slider:0.5B–48B in0.5B steps, selecting corresponding quanti
 
 Development assistance: **OpenAI Codex**. The initial application code and documentation were developed with Codex assistance.
 
-Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.1 experimental**.
+Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.2 experimental**.
 
-## Two recommendation sliders (0.7.1)
+## Two recommendation sliders (0.7.2)
 
-**Compression → full precision** has five same-27B choices: IQ2_XS, IQ3_XXS, Q4_K_M, Q8_0 and true BF16 text weights. **Conversation length & memory requirement** selects 4K / 4K / 8K / 16K / 32K and corresponding memory-retrieval/summary budgets. Neither slider is a measured quality score or an accuracy guarantee.
+**Compression → full precision** has five same-27B choices: IQ2_XS, IQ3_XXS, Q4_K_M, Q8_0 and true BF16 text weights. **Conversation length & memory requirement** selects 2K / 4K / 6K / 8K / 10K and corresponding memory-retrieval/summary budgets. Neither slider is a measured quality score or an accuracy guarantee.
 
 Hardware, disk, context and speech are assessed together. The requested precision stays visible; a lower feasible recommendation is clearly identified. If no precision fits the requested conversation requirement, no plan is offered. API text is not relabeled by the local sliders. Dragging only updates recommendations; downloading requires an explicit button click.
 
@@ -22,7 +24,7 @@ After a successful local deployment or explicit MD plan import, MDC applies the 
 
 ## Same-model compression (0.6.0 experiment)
 
-Under **Voice & deployment → Usage → Compressed large model**, choose among four GSQ-RCO GGUF quantizations of **Qwen3.8-27B**. The parameter class stays 27B; this is not a tiny-model fallback. Available input modes remain 4K / 16K. Recommendations reserve runtime/context memory and local speech resources, and refuse a compressed plan that does not fit.
+Under **Voice & deployment → Usage → Compressed large model**, choose among four GSQ-RCO GGUF quantizations of **Qwen3.8-27B**. The parameter class stays 27B; this is not a tiny-model fallback. Current recommendation contexts are2K /4K /6K /8K /10K. Recommendations reserve runtime/context memory and local speech resources, and refuse a compressed plan that does not fit.
 
 The text-only installer uses a pinned publisher revision, verifies file length and SHA-256, and imports the GGUF through the Ollama CLI. Cache plus model storage can require two copies during import. It does not run GSQ/RCO training or install the vision projector. Download size is not VRAM usage; numerical quality and speed depend on hardware and quantization.
 

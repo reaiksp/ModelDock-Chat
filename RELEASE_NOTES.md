@@ -1,3 +1,18 @@
+# 0.7.2 · 2K一档上下文 / Context in2K increments
+
+- 上下文五档统一为2K /4K /6K /8K /10K，默认保持4K。
+- 旧偏好迁移后标记新刻度；已部署方案及当前聊天上下文不因拖动或升级而改变。
+- 配套新版MD/MDC可精确导入2K/6K/10K，旧16K/32K方案仍保留实际上下文；记忆、黑话、API和用户原文保留。
+- 上下文内存预留插值估算，语音独立资源门槛保持。2K不保证语音可运行。
+
+English: Both applications now offer five context positions in2K increments, from2K through10K. Existing active/deployed contexts remain unchanged. New plans import exactly; old16K/32K plans remain usable. Speech resource requirements and original user data are preserved.
+
+[说明 / Details](docs/DUAL_SLIDERS.md) · [MD](https://github.com/reaiksp/ModelDock-Windows) · [MDC](https://github.com/reaiksp/ModelDock-Chat)
+
+验证：MD200项、MDC365项回归通过；8,640组双端联合推荐一致，原生界面与方案导入检查通过。 / Validation:200 MD and365 MDC tests,8,640 cross-application recommendation cases and native UI/import checks passed.
+
+---
+
 # 0.7.1 · 模型参数范围 / Parameter range
 
 - 新增0.5B–48B参数上限滑条，0.5B步进，共96个位置；显示实际匹配模型，中间位置均参与推荐。

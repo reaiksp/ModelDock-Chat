@@ -18,11 +18,11 @@ MD 与 MDC 独立运行，使用一致的两条需求设置。拖动只计算推
 
 | 档位 | 需求 | 上下文 | 相对4K额外内存估算 GiB |
 | --- | --- | ---: | ---: |
-| 1 | 短聊、基础记忆 | 4096 | 0 |
+| 1 | 短聊、基础记忆 | 2048 | 0 |
 | 2 | 日常对话、常规记忆 | 4096 | 0 |
-| 3 | 较长对话、加强检索 | 8192 | 1.5 |
-| 4 | 长聊、详细续聊摘要 | 16384 | 4 |
-| 5 | 很长对话、更重视保留细节 | 32768 | 8 |
+| 3 | 较长对话、加强检索 | 6144 | 0.75 |
+| 4 | 长聊、详细续聊摘要 | 8192 | 1.5 |
+| 5 | 很长对话、更重视保留细节 | 10240 | 2.125 |
 
 MDC 随档位增加已确认记忆与黑话的可选检索预算、续聊摘要预算，并更早预留概括空间。实际请求仍检查模型元数据及总输入预算。人格、用户资料、原始输入不为适配而截断；完整已存聊天不会因档位低而删除。可选条目只在预算内整条纳入，未确认摘要不升级为用户事实。检索和摘要仍可能遗漏或出错，需求档位不是记忆准确率承诺。
 
@@ -50,10 +50,19 @@ MD成功部署的方案记录目标档、实际档、对话需求、上下文和
 
 ## English
 
-The first five-step slider selects compression of the same 27B base, from IQ2_XS through IQ3_XXS, Q4_K_M and Q8_0 to real BF16 text weights. It is not a quality score. The second selects conversation and memory requirements: 4K, 4K, 8K, 16K or 32K with larger retrieval/summary budgets and earlier summarization. Full stored history and original user text remain intact. Memory accuracy is not guaranteed.
+The first five-step slider selects compression of the same 27B base, from IQ2_XS through IQ3_XXS, Q4_K_M and Q8_0 to real BF16 text weights. It is not a quality score. The second selects conversation and memory requirements: 2K, 4K, 6K, 8K or 10K with larger retrieval/summary budgets and earlier summarization. Full stored history and original user text remain intact. Memory accuracy is not guaranteed.
 
 Both requirements are evaluated with actual hardware, disk and speech reserves. A recommendation never exceeds the requested precision; any fallback is shown. Conversation length is not silently shortened. API text is not controlled by local precision settings. Explicit speech selection is respected; automatic speech first maximizes feasible text precision, then chooses speech within that text grade.
 
 Dragging neither downloads weights nor changes the active chat backend. Download requires a deliberate click. Successful deployment or explicit MD import applies a per-model memory strategy. Approved memories and slang can be saved together in a private default-prompt snapshot; pending data is excluded. This stores configuration, not trained weights, and still consumes context.
 
 Precision files are pinned to the above publishers and revisions with exact size/SHA-256 checks. Q4/Q8/BF16 received metadata/header checks, not full local inference validation. Across 2,025 hardware/precision/context/voice combinations MD and MDC returned matching recommendations. The installed IQ2_XS model passed a temporary private-configuration write/read check for approved synthetic memory and slang, excluding candidates; test models were removed. New learning/generation/recall could not complete with the available resources. Configuration persistence does not establish recall accuracy. See release notes for details.
+
+
+## 2K一档更新 / 2K increments
+
+五个推荐档固定为2048、4096、6144、8192、10240。旧偏好只迁移推荐位置并显示新值，超过新条范围的偏好映射到最高档；已部署模型、聊天草稿、人格、API配置以及已保存方案不自动改上下文。旧16K/32K方案仍可导入并继续使用原值；新2K/6K/10K方案可精确导入，不向下取整为4K/8K。
+
+内存预留仍以4K模型估算为基准；2K不虚构固定内存节省，6K/10K在现有锚点间线性估算。新参数家族保留更高的上下文预留系数。语音模型的固定显存、系统内存和磁盘预留不随文字上下文降低；2K不是语音一定可运行的保证。人格、原始输入与语言适配仍检查实际预算，超出只警告，不截断原文。
+
+English: Five recommendation positions now represent2K/4K/6K/8K/10K. Old preferences migrate once; active models and saved plans keep their exact context. Older16K/32K plans remain usable, and new2K/6K/10K plans import without rounding down. Resource estimates retain a4K baseline and interpolate additional context reserves. Speech memory requirements are independent;2K does not guarantee feasibility. Original user text is preserved and oversized requests are warned about.

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
+from .context_levels import CONVERSATION_CONTEXTS, context_reserve
 from .parameters import VARIANTS, parameter_size, download_gib, runtime_gib
 
 FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -53,8 +54,8 @@ for quant, size_bytes, memory, digest in [
 # Legacy ungraded calls retain the original four GSQ/RCO choices above.
 GRADE_LABELS = {1: "极致精简 · 约2 bit", 2: "轻量优先 · 约3 bit", 3: "均衡 · Q4_K_M",
                 4: "高精度 · Q8_0", 5: "完全体 · F16 / BF16"}
-CONVERSATION_CONTEXTS = {1: 4096, 2: 4096, 3: 8192, 4: 16384, 5: 32768}
-CONVERSATION_RESERVES = {1: 0.0, 2: 0.0, 3: 1.5, 4: 4.0, 5: 8.0}
+
+CONVERSATION_RESERVES = {level: context_reserve(context) for level, context in CONVERSATION_CONTEXTS.items()}
 for data in TEXT_METADATA.values():
     data["compression_grade"] = {"IQ2_XS": 1, "IQ3_XXS": 2}.get(data["quantization"], 0)
 GRADE_TEXT_MODELS = {data["compression_grade"]: row
@@ -157,7 +158,7 @@ def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced",
     context = (CONVERSATION_CONTEXTS[conversation_demand] if conversation_demand is not None
                else (16384 if capacity == "context" else 4096))
     extra = (CONVERSATION_RESERVES[conversation_demand] if conversation_demand is not None
-             else (4.0 if context > 4096 else 0.0)) if not remote_text else 0.0
+             else context_reserve(context)) if not remote_text else 0.0
     if graded and selected_parameters != 27:
         extra *= 2  # Conservative context reserve for newly catalogued transformer families.
     if remote_text and conversation_demand is not None:

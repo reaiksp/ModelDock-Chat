@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import PARENT_URL, __version__
+from .context_levels import CONVERSATION_CONTEXTS, demand_for_context
 from .context import Budget, estimate, message_cost, system_prompt
 from .engine import Engine
 from .network import Cancelled, Client, Task, connect_local, model_context
@@ -1306,7 +1307,7 @@ class Window(QMainWindow):
                     self.store.execute("UPDATE sessions SET route_id=? WHERE id=?", (ident, self.session_id))
             self.context_combo.blockSignals(True)
             self.context_combo.clear()
-            choices = [n for n in [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144] if n <= self.engine.model_limit]
+            choices = [n for n in [2048, 4096, 6144, 8192, 10240, 16384, 32768, 65536, 131072, 262144] if n <= self.engine.model_limit]
             if self.engine.model_limit not in choices:
                 choices.append(self.engine.model_limit)
             for value in sorted(choices):
@@ -1374,7 +1375,7 @@ class Window(QMainWindow):
             model=settings.get("model","")
             plan=settings.get("model_plans",{}).get(model,{})
             context=plan.get("context")
-            if not model or context not in {4096,8192,16384,32768} or plan.get("model")!=model:
+            if not model or context not in {2048,4096,6144,8192,10240,16384,32768} or plan.get("model")!=model:
                 raise ValueError("MD 尚无完整部署方案，请先成功部署模型。")
             contexts=self.store.get("model_contexts",{})
             contexts[model]=context
@@ -1384,7 +1385,9 @@ class Window(QMainWindow):
             from .network import model_key
             metadata = next((value for name, value in TEXT_METADATA.items() if model_key(name) == model_key(model)), {})
             compression = plan.get("compression_level", metadata.get("compression_grade", 3))
-            demand = plan.get("conversation_demand", {4096: 2, 8192: 3, 16384: 4, 32768: 5}[context])
+            demand = plan.get("conversation_demand")
+            if plan.get("conversation_scale") != 2 or type(demand) is not int or CONVERSATION_CONTEXTS.get(demand) != context:
+                demand = demand_for_context(context)
             valid_compression = type(compression) is int and 1 <= compression <= 5
             valid_demand = type(demand) is int and 1 <= demand <= 5
             voice = plan.get("voice", "off")
@@ -1484,7 +1487,7 @@ class Window(QMainWindow):
         def done(limit):
             self.engine.model_limit = limit
             requested = int(self.store.get("model_contexts",{}).get(model,self.store.get("context", 4096)))
-            options = [x for x in [2048, 4096, 8192, 16384, 32768] if x <= limit]
+            options = [x for x in [2048, 4096, 6144, 8192, 10240, 16384, 32768] if x <= limit]
             if not options:
                 options = [limit]
             value = max([x for x in options if x <= requested] or [options[0]])

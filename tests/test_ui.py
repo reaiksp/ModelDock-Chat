@@ -339,10 +339,10 @@ def test_import_md_dual_sliders_and_memory_policy_keeps_api_draft(window, tmp_pa
     window.prompt.setPlainText("原始草稿🙂")
     window.import_md_plan()
     assert window.speech.compression_slider.value() == 5
-    assert window.speech.conversation_slider.value() == 3
+    assert window.speech.conversation_slider.value() == 4
     assert window.speech.usage.currentData() == "compressed"
     assert window.store.get("model_contexts")[tag] == 8192
-    assert window.store.get("model_demands")[tag] == 3
+    assert window.store.get("model_demands")[tag] == 4
     assert window.engine.model == "active-provider-model" and window.engine.backend == "api"
     assert window.prompt.toPlainText() == "原始草稿🙂"
 
@@ -379,3 +379,25 @@ def test_import_md_parameter_limit_and_actual_quantized_model(window, tmp_path, 
     assert window.speech.usage.currentData() == 'compressed'
     assert window.store.get('model') == tag
     assert window.store.get('model_contexts')[tag] == 8192
+
+
+@pytest.mark.parametrize('context', [2048,6144,10240])
+def test_import_new_2k_step_plan_and_metadata_preserve_exact_context(window,tmp_path,monkeypatch,context):
+    import json
+    directory=tmp_path/'ModelDock';directory.mkdir()
+    tag='test-model'
+    plan={'model':tag,'context':context,'conversation_demand':context//2048,'conversation_scale':2,'voice':'off'}
+    (directory/'settings.json').write_text(json.dumps({'model':tag,'model_plans':{tag:plan}}),encoding='utf-8')
+    monkeypatch.setenv('LOCALAPPDATA',str(tmp_path))
+    monkeypatch.setattr(window,'connect',lambda:None)
+    window.prompt.setPlainText('保留我的草稿🙂')
+    window.import_md_plan()
+    assert window.speech.conversation_slider.value()==context//2048
+    assert window.store.get('model_contexts')[tag]==context
+    window.engine.model=tag
+    window.engine.backend='local'
+    monkeypatch.setattr(window,'run_job',lambda fn,done,kind:done(32768))
+    window.read_model_info()
+    assert window.engine.context==context
+    assert window.context_combo.currentData()==context
+    assert window.prompt.toPlainText()=='保留我的草稿🙂'

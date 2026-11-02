@@ -15,6 +15,7 @@ from .hardware import (detect, recommend, free_disk, ollama_models_dir, GRADE_LA
 from .gguf import install_gguf, is_supported
 from .i18n import tr
 from .parameters import parameter_size, saved_parameter
+from .context_levels import saved_conversation
 from .network import Client, connect_local, verify_local_model
 from .speech import (SpeechRecords, SpeechService, readout_text, SPEAKERS, LANGUAGES,
                      run_command)
@@ -128,8 +129,7 @@ class SpeechPanel(QWidget):
         self.conversation_slider.setPageStep(1)
         self.conversation_slider.setTickInterval(1)
         self.conversation_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        legacy_demand = 4 if self.settings.get("capacity") == "context" else 2
-        self.conversation_slider.setValue(self.saved_level(self.settings.get("conversation_demand"), legacy_demand))
+        self.conversation_slider.setValue(saved_conversation(self.settings))
         self.conversation_value = QLabel()
         self.conversation_value.setWordWrap(True)
         conversation_box = QVBoxLayout()
@@ -333,7 +333,7 @@ class SpeechPanel(QWidget):
         self.update_recommendations()
 
     def legacy_capacity_changed(self):
-        value = 4 if self.capacity.currentData() == "context" else 2
+        value = 5 if self.capacity.currentData() == "context" else 2
         if self.conversation_slider.value() != value:
             self.conversation_slider.setValue(value)
         else:
@@ -367,7 +367,7 @@ class SpeechPanel(QWidget):
             self.settings = {}
 
     def snapshot(self):
-        return {**self.settings, "parameter_limit": self.parameter_slider.value() / 2, "enabled": self.mode.currentData(), "variant": self.variant.currentData(),
+        return {**self.settings, "conversation_scale": 2, "parameter_limit": self.parameter_slider.value() / 2, "enabled": self.mode.currentData(), "variant": self.variant.currentData(),
             "capacity": "context" if self.conversation_slider.value() >= 4 else "large",
             "compression_level": self.compression_slider.value(), "conversation_demand": self.conversation_slider.value(),
             "usage": self.usage.currentData(), "preference": self.preference.currentData(),
