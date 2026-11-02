@@ -47,6 +47,41 @@ for quant, size_bytes, memory, digest in [
         "source_revision": COMPRESSED_REVISION, "filename": filename,
         "size_bytes": size_bytes, "sha256": digest}
 
+
+# The five slider positions keep the same base model and end at BF16 text weights.
+# Legacy ungraded calls retain the original four GSQ/RCO choices above.
+GRADE_LABELS = {1: "极致精简 · IQ2_XS", 2: "轻量优先 · IQ3_XXS", 3: "均衡 · Q4_K_M",
+                4: "高精度 · Q8_0", 5: "完全体 · BF16"}
+CONVERSATION_CONTEXTS = {1: 4096, 2: 4096, 3: 8192, 4: 16384, 5: 32768}
+CONVERSATION_RESERVES = {1: 0.0, 2: 0.0, 3: 1.5, 4: 4.0, 5: 8.0}
+for data in TEXT_METADATA.values():
+    data["compression_grade"] = {"IQ2_XS": 1, "IQ3_XXS": 2}.get(data["quantization"], 0)
+GRADE_TEXT_MODELS = {data["compression_grade"]: row
+                     for row in TEXT_MODELS["compressed"]
+                     if (data := TEXT_METADATA[row[0]])["compression_grade"]}
+for grade, quant, size_bytes, memory, digest in [
+    (3, "Q4_K_M", 18973870528, 20.5, "c600de0300ae8a0eb3a6c0b8b5561b8b96f16bd2c863c2a66c42de29d391a747"),
+    (4, "Q8_0", 28595763648, 30.0, "aab65c67ef0dad127960efef9247f1832bca105faa1c7a052cc039b223cf86a1"),
+    (5, "BF16", 53808282048, 54.0, "222e1905eef352bae7c06f3d17dd9385bcb2ee96f435573d18457c7ad1002894"),
+]:
+    repo = "ggml-org/Qwen3.8-27B-GGUF"
+    filename = "Qwen3.8-27B-" + quant + ".gguf"
+    tag = "hf.co/" + repo + ":" + filename
+    download = math.ceil(size_bytes / 1024**3 * 10) / 10
+    GRADE_TEXT_MODELS[grade] = (tag, download, memory)
+    TEXT_METADATA[tag] = {"method": "BF16 原精度" if grade == 5 else "GGUF 量化",
+        "base_model": "Qwen/Qwen3.8-27B", "parameters": "27B", "quantization": quant,
+        "compression_grade": grade, "source": "https://huggingface.co/" + repo,
+        "source_revision": "a316ea527fde32c12487be7574e2db5ac2ad2a7e",
+        "filename": filename, "size_bytes": size_bytes, "sha256": digest}
+
+
+def _level(value, field):
+    if isinstance(value, bool) or not isinstance(value, int) or value not in range(1, 6):
+        raise ValueError(field + "必须是 1–5 的整数。")
+    return value
+
+
 @dataclass
 class Hardware:
     ram: float
@@ -95,40 +130,68 @@ def detect(data_path):
                     free_disk(data_path), free_disk(ollama_models_dir()), gpu)
 
 
-def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced", same_disk=True, remote_text=False, capacity="large"):
-    """Never sum VRAM with RAM or different GPUs. No unsupported CPU TTS recommendation."""
+def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced", same_disk=True,
+              remote_text=False, capacity="large", compression_level=None, conversation_demand=None):
+    """Joint budgets; sliders never change providers or reduce requested context."""
+    if compression_level is not None:
+        _level(compression_level, "压缩档位")
+    if conversation_demand is not None:
+        _level(conversation_demand, "对话需求")
+    graded = compression_level is not None and usage == "compressed" and not remote_text
     ram = max(0, min(hw.ram - max(3, hw.ram * .2), hw.available - 1))
     gpu = max(0, hw.vram - max(1, hw.vram * .12))
     sizes = ([size] if size in VOICE_MODELS else
              (["1.7B", "0.6B"] if preference == "quality" else ["0.6B", "1.7B"])) if voice else [None]
-    context = 16384 if capacity == "context" else 4096
-    extra = 4.0 if context > 4096 and not remote_text else 0
+    context = (CONVERSATION_CONTEXTS[conversation_demand] if conversation_demand is not None
+               else (16384 if capacity == "context" else 4096))
+    extra = (CONVERSATION_RESERVES[conversation_demand] if conversation_demand is not None
+             else (4.0 if context > 4096 else 0.0)) if not remote_text else 0.0
+    if remote_text and conversation_demand is not None:
+        context = None  # This plan covers local speech, never the provider's context setting.
+    choices = ([("API", 0, 0)] if remote_text else
+               [GRADE_TEXT_MODELS[level] for level in range(1, compression_level + 1)] if graded else
+               TEXT_MODELS.get(usage, TEXT_MODELS["chat"]))
     plans = []
     for variant in sizes:
         reserve = VOICE_MODELS[variant] if variant else {"gpu": 0, "ram": 0, "disk": 0}
-        if variant and (gpu < reserve["gpu"] + (0 if remote_text else 1.6) or ram < reserve["ram"] + (0 if remote_text else 2) or hw.disk < reserve["disk"] + 12):
+        if variant and (gpu < reserve["gpu"] + (0 if remote_text else 1.6)
+                        or ram < reserve["ram"] + (0 if remote_text else 2)
+                        or hw.disk < reserve["disk"] + 12):
             continue
         use_gpu = gpu >= 1.6 and ram >= 2
         budget = (gpu - reserve["gpu"]) if use_gpu else ram
         if not use_gpu and preference != "quality":
             budget = min(budget, (3.2 if preference == "speed" else 5) + extra)
-        for tag, download, memory in ([("API", 0, 0)] if remote_text else TEXT_MODELS.get(usage, TEXT_MODELS["chat"])):
+        for tag, download, memory in choices:
             required = download * (2.15 if tag in TEXT_METADATA else 1.15) + 1 + ((reserve["disk"] + 12) if variant and same_disk else 0)
             if memory + extra <= budget and (remote_text or hw.model_disk >= required):
+                metadata = TEXT_METADATA.get(tag, {})
+                effective = metadata.get("compression_grade", 0) if graded else 0
+                fallback = ("所选档位无法同时满足文字、对话上下文、语音或磁盘预算，已推荐可容纳的较低档位。"
+                            if graded and effective < compression_level else "")
                 plans.append({"text": tag, "voice": variant, "memory": memory,
-                    "budget": round(budget, 1), "context": context, "context_reserve":extra, "reserve_gpu": reserve["gpu"],
-                    "reserve_ram": reserve["ram"], "device": "cuda:0" if variant else None,
-                    "mode": "GPU" if use_gpu else "CPU", "download": download,
-                    **TEXT_METADATA.get(tag, {})})
+                    "budget": round(budget, 1), "context": context, "context_reserve": extra,
+                    "reserve_gpu": reserve["gpu"], "reserve_ram": reserve["ram"],
+                    "device": "cuda:0" if variant else None, "mode": "GPU" if use_gpu else "CPU",
+                    "download": download, **metadata,
+                    "compression_level": compression_level if graded else None,
+                    "effective_compression_level": effective, "fallback_reason": fallback,
+                    "conversation_demand": conversation_demand if not remote_text else None})
     if not plans:
         return None
+    if graded:
+        # The slider owns compression selection. Speed preference must not lower it again.
+        top = max(p["effective_compression_level"] for p in plans)
+        plans = [p for p in plans if p["effective_compression_level"] == top]
+        preferred = "1.7B" if preference == "quality" else "0.6B"
+        return max(plans, key=lambda p: p["voice"] == preferred)
+    # Legacy callers keep the original TTS-first automatic preference semantics.
     if voice and size == "auto" and preference == "quality":
         preferred = [p for p in plans if p["voice"] == "1.7B"]
         plans = preferred or plans
-    # Prefer the largest text model that fits; break ties in favour of smaller TTS.
     plans.sort(key=lambda p: (p["memory"], p["voice"] == "0.6B"))
     if preference == "speed":
-        sizes = sorted(set(p["memory"] for p in plans))
-        chosen = sizes[max(0, len(sizes) - 2)]
+        memories = sorted(set(p["memory"] for p in plans))
+        chosen = memories[max(0, len(memories) - 2)]
         plans = [p for p in plans if p["memory"] == chosen]
     return plans[-1]

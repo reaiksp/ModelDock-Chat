@@ -58,12 +58,12 @@ def use_response(monkeypatch, response, seen=None):
 
 def test_only_exact_audited_non_mtp_tags_are_supported():
     assert gguf.is_supported(TAG.swapcase())
-    assert len(gguf.FILES) == 4
+    assert len(gguf.FILES) == 7
     assert not gguf.is_supported(TAG.replace('.gguf', '-mtp.gguf'))
     assert not gguf.is_supported('hf.co/other/repo:IQ2_XS')
     assert not gguf.is_supported('https://example.com/model.gguf')
     for spec in gguf.FILES.values():
-        assert spec['revision'] == gguf.REVISION and len(spec['sha256']) == 64
+        assert len(spec['revision']) == 40 and len(spec['sha256']) == 64
         assert '-mtp' not in spec['filename'] and spec['size'] > 8_000_000_000
 
 
@@ -296,3 +296,17 @@ def test_corrupted_prefix_never_passes_full_hash(tmp_path, monkeypatch, small_sp
     with pytest.raises(RuntimeError, match='SHA-256'):
         gguf._download(spec, target, Task(), lambda x: None, None)
     assert not target.exists()
+
+
+@pytest.mark.parametrize('suffix', ['Q4_K_M', 'Q8_0', 'BF16'])
+def test_precision_file_uses_its_own_pinned_repository(tmp_path, monkeypatch, suffix):
+    tag = 'hf.co/ggml-org/Qwen3.8-27B-GGUF:Qwen3.8-27B-' + suffix + '.gguf'
+    payload = b'GGUF synthetic exact content'
+    spec = dict(gguf.FILES[tag.casefold()], size=len(payload), sha256=hashlib.sha256(payload).hexdigest())
+    seen = []
+    use_response(monkeypatch, Response(payload, len(payload)), seen)
+    target = tmp_path / spec['filename']
+    gguf._download(spec, target, Task(), lambda x: None, None)
+    assert '/ggml-org/Qwen3.8-27B-GGUF/resolve/a316ea527fde32c12487be7574e2db5ac2ad2a7e/' in seen[0][0]
+    assert 'ISTA-DASLab' not in seen[0][0]
+    assert target.read_bytes() == payload

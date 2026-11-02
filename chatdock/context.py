@@ -67,7 +67,7 @@ def system_prompt(persona, memories=(), knowledge=(), summary="", response_langu
     return "\n\n".join(parts)
 
 
-def retrieve(store, text, total_budget=900):
+def retrieve(store, text, total_budget=900, memory_budget=500):
     """Deterministic term/alias retrieval; pending records are never injected."""
     query = text.casefold()
     found, used = [], 0
@@ -85,7 +85,18 @@ def retrieve(store, text, total_budget=900):
     for row in sorted(store.items("memories", "approved"), key=lambda r: (r["score"], r["id"]), reverse=True):
         value = {"score": row["score"], "summary": row["summary"], "analysis": clip(row["analysis"], 180)}
         cost = estimate(json.dumps(value, ensure_ascii=False)) + 4
-        if used + cost <= 500:
+        if used + cost <= memory_budget:
             memories.append(value)
             used += cost
     return memories, found
+
+
+# These are strategy limits, not promises of factual accuracy or retention rates.
+CONVERSATION_POLICIES = {
+    1: {"memory": 300, "knowledge": 600, "summary": 400, "rollover": .90},
+    2: {"memory": 500, "knowledge": 900, "summary": 600, "rollover": .88},
+    3: {"memory": 1000, "knowledge": 1200, "summary": 900, "rollover": .85},
+    4: {"memory": 1600, "knowledge": 1800, "summary": 1400, "rollover": .82},
+    5: {"memory": 2400, "knowledge": 2400, "summary": 2000, "rollover": .80},
+}
+DEFAULT_CONVERSATION_POLICY = {"memory": 500, "knowledge": 900, "summary": 600, "rollover": .90}

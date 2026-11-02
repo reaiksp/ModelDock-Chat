@@ -286,3 +286,28 @@ def test_delete_uses_delete_method_and_clears_task_resources(monkeypatch):
     assert calls == [("127.0.0.1", 11434, 10),
                      ("DELETE", "/api/delete", {"model": "mdc-private-a-r1"}), "closed"]
     assert task.connection is None and task.socket is None
+
+
+def test_combined_snapshot_keeps_approved_memory_and_slang_with_evidence_boundary(store):
+    memory = store.add_memory("测试代号是琥珀灯塔731", status="approved")
+    slang = store.add_knowledge("绿灯熊", "已经完成校验的功能", status="approved")
+    store.add_memory("PENDING_MEMORY")
+    store.add_knowledge("PENDING_TERM", "SECRET")
+    result = build_snapshot(store, 1, 4096)
+    assert result["included_ids"] == [memory]
+    assert result["included_knowledge_ids"] == [slang]
+    assert "琥珀灯塔731" in result["system"] and "已经完成校验的功能" in result["system"]
+    assert "PENDING" not in result["system"]
+    original = result["fingerprint"]
+    store.delete_items("knowledge", [slang])
+    changed = build_snapshot(store, 1, 4096)
+    assert changed["fingerprint"] != original and not changed["included_knowledge_ids"]
+
+
+def test_oversized_slang_is_omitted_whole_and_reported(store):
+    term = store.add_knowledge("整条", "保持完整定义" * 600, status="approved")
+    result = build_snapshot(store, 1, 4096)
+    assert result["omitted_knowledge_count"] == 1
+    assert result["included_knowledge_ids"] == []
+    assert "保持完整定义" not in result["system"]
+    assert len(store.items("knowledge")) == 1

@@ -320,3 +320,28 @@ def test_unverified_private_versions_are_marked_and_not_reported_as_ready(window
     window.i18n.set_language('en')
     assert 'No verified' in window.personal_info.text()
     assert 'unverified' in window.personal_info.text()
+
+
+def test_import_md_dual_sliders_and_memory_policy_keeps_api_draft(window, tmp_path, monkeypatch):
+    import json
+    from chatdock.hardware import GRADE_TEXT_MODELS
+    tag = GRADE_TEXT_MODELS[2][0]
+    root = tmp_path / "ModelDock"
+    root.mkdir()
+    (root / "settings.json").write_text(json.dumps({"model": tag, "model_plans": {tag: {
+        "model": tag, "context": 8192, "capacity": "large", "voice": "0.6B",
+        "usage": "压缩大模型", "compression_level": 5, "effective_compression_level": 2,
+        "conversation_demand": 3}}}), encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(window, "connect", lambda: None)
+    window.engine.backend = "api"
+    window.engine.model = "active-provider-model"
+    window.prompt.setPlainText("原始草稿🙂")
+    window.import_md_plan()
+    assert window.speech.compression_slider.value() == 5
+    assert window.speech.conversation_slider.value() == 3
+    assert window.speech.usage.currentData() == "compressed"
+    assert window.store.get("model_contexts")[tag] == 8192
+    assert window.store.get("model_demands")[tag] == 3
+    assert window.engine.model == "active-provider-model" and window.engine.backend == "api"
+    assert window.prompt.toPlainText() == "原始草稿🙂"

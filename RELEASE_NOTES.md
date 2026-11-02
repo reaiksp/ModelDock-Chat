@@ -1,3 +1,29 @@
+# ModelDock Chat 0.7.0 · 双需求条与记忆黑话验证
+
+- 同参数精简到 BF16 完全体五档，与对话长度／记忆需求五档共同推荐。
+- 所选目标与实际推荐分开显示，联合语音、上下文、内存和双份磁盘缓存预算。
+- 拖动不下载、不切换聊天模型；保留用户主动点击下载按钮。API 后端保持不变。
+- MD 部署方案导入同步需求、上下文与语音；按模型保存记忆策略，不改用户原文。
+- 私有默认提示快照支持已确认记忆和黑话共同保存，仍非权重训练。
+
+## 本次验证 / Validation
+
+- 完整回归 247 项测试通过；补充 API 同名模型隔离后，76 项相关回归通过，原生进程均正常退出。
+- 打包后的独立程序启动、中英文界面、双滑条范围、主动下载入口、语音桥接和音频文件释放检查通过。
+- MD / MDC 共 2,025 组硬件、精度、对话需求和语音组合的推荐结果一致；固定 GGUF 来源表一致。独立原生界面检查覆盖中英文、双滑条和主动下载入口。
+- 已安装的 IQ2_XS 临时私有模型通过记忆与黑话共同写入／读回配置验证：仅纳入已确认的虚构记录，候选排除，基础模型未变，测试私有模型已删除。
+- 当前可用内存／显存不足，新的真实生成、AI 黑话学习和召回试验未完成；本次配置写入验证不能证明这些能力的实际质量。此前 4K IQ2_XS 人格／记忆召回实测记录保留在 0.6.0 说明。
+- Q4 / Q8 / BF16 只核对上游固定版本、文件大小、SHA-256 和文件头，未全量下载推理；32K、CPU、其他显卡及语音并发仍需相应硬件验收。
+- 写入私有模型是系统提示持久化，仍占上下文，不是训练权重或保证记忆准确率。
+
+English: 247 full regression tests passed, followed by 76 targeted checks after adding an API model-name collision guard. 2,025 MD/MDC recommendation combinations matched. Native bilingual UI checks passed. The installed IQ2_XS model accepted and returned approved synthetic memory and slang together in a temporary private default-prompt configuration; pending candidates were excluded and temporary models removed. New AI learning/generation/recall did not complete due to insufficient available RAM/VRAM. This verifies configuration persistence, not weight training or recall quality. Q4/Q8/BF16 and 32K/concurrent TTS have not received full local inference validation.
+
+详见 [双需求条说明](docs/DUAL_SLIDERS.md)。
+
+配套：[MD](https://github.com/reaiksp/ModelDock-Windows) · [MDC](https://github.com/reaiksp/ModelDock-Chat)
+
+---
+
 # ModelDock Chat 0.6.0 · 同参数大模型压缩实验
 
 - 新增 Qwen3.8-27B 的 GSQ-RCO 四档低比特 GGUF，不通过换成小参数模型实现低配方案。

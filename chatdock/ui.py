@@ -279,6 +279,8 @@ class Window(QMainWindow):
         self.transcript.verticalScrollBar().setValue(position)
         if self.speech.hw:
             self.speech.scanned(self.speech.hw)
+        else:
+            self.speech.update_recommendations()
         self.speech.show_quality()
         self.refresh_personal_models()
 
@@ -696,7 +698,7 @@ class Window(QMainWindow):
         row = QHBoxLayout()
         experiment, exp = card()
         exp.addWidget(label("私有记忆模型 · 实验", "section"))
-        exp.addWidget(label("把已确认记忆、用户资料、可选人格和续聊摘要保存为本机模型的默认提示。属于配置快照，仍占上下文，不是权重训练。", "muted", True))
+        exp.addWidget(label("把已确认记忆、黑话、用户资料、可选人格和续聊摘要保存为本机模型的默认提示。属于配置快照，仍占上下文，不是权重训练。", "muted", True))
         self.personal_auto = QCheckBox("自动更新私有模型（仅本机；下次发送及自动续聊时）")
         self.personal_auto.setChecked(bool(self.store.get("personal_model_auto", False)))
         self.personal_auto.toggled.connect(lambda value: self.store.set("personal_model_auto", value))
@@ -839,6 +841,7 @@ class Window(QMainWindow):
         try:
             snapshot = self.engine.personal_snapshot(self.session_id)
             counts = tr("已纳入 {0} 条已确认记忆；预算省略 {1} 条。").format(len(snapshot['included_ids']), snapshot['omitted_count'])
+            counts += "\n" + tr("已纳入 {0} 条已确认黑话；预算省略 {1} 条。").format(len(snapshot.get("included_knowledge_ids", [])), snapshot.get("omitted_knowledge_count", 0))
             counts += "\n" + tr("预算 {0} / {1}；其中预留新输入 {2}。").format(snapshot['used'], snapshot['input_limit'], snapshot['reserved_input'])
             self.show_memory_text("私有模型写入预览", counts + "\n\n" + snapshot["system"])
         except ValueError as exc:
@@ -1371,21 +1374,46 @@ class Window(QMainWindow):
             model=settings.get("model","")
             plan=settings.get("model_plans",{}).get(model,{})
             context=plan.get("context")
-            if not model or context not in {4096,16384} or plan.get("model")!=model:
+            if not model or context not in {4096,8192,16384,32768} or plan.get("model")!=model:
                 raise ValueError("MD 尚无完整部署方案，请先成功部署模型。")
             contexts=self.store.get("model_contexts",{})
             contexts[model]=context
             self.store.set("model_contexts",contexts)
             self.store.set("model",model)
-            self.speech.capacity.setCurrentIndex(self.speech.capacity.findData(plan.get("capacity","large")))
-            voice=plan.get("voice","off")
-            blocked=self.speech.mode.blockSignals(True)
-            if voice in {"0.6B","1.7B"}:
-                self.speech.variant.setCurrentIndex(self.speech.variant.findData(voice))
-                self.speech.mode.setCurrentIndex(1)
-            else:
-                self.speech.mode.setCurrentIndex(0)
-            self.speech.mode.blockSignals(blocked)
+            from .hardware import TEXT_METADATA
+            from .network import model_key
+            metadata = next((value for name, value in TEXT_METADATA.items() if model_key(name) == model_key(model)), {})
+            compression = plan.get("compression_level", metadata.get("compression_grade", 3))
+            demand = plan.get("conversation_demand", {4096: 2, 8192: 3, 16384: 4, 32768: 5}[context])
+            valid_compression = type(compression) is int and 1 <= compression <= 5
+            valid_demand = type(demand) is int and 1 <= demand <= 5
+            voice = plan.get("voice", "off")
+            names = ["capacity", "mode", "variant", "usage", "compression_slider", "conversation_slider"]
+            widgets = [getattr(self.speech, name) for name in names if hasattr(self.speech, name)]
+            blocked = [(widget, widget.blockSignals(True)) for widget in widgets]
+            try:
+                self.speech.capacity.setCurrentIndex(max(0, self.speech.capacity.findData(plan.get("capacity", "large"))))
+                usage = {"通用对话": "chat", "代码开发": "code", "压缩大模型": "compressed"}.get(plan.get("usage"))
+                if metadata:
+                    usage = "compressed"
+                if usage:
+                    self.speech.usage.setCurrentIndex(max(0, self.speech.usage.findData(usage)))
+                if valid_compression and hasattr(self.speech, "compression_slider"):
+                    self.speech.compression_slider.setValue(compression)
+                if valid_demand and hasattr(self.speech, "conversation_slider"):
+                    self.speech.conversation_slider.setValue(demand)
+                if voice in {"0.6B", "1.7B"}:
+                    self.speech.variant.setCurrentIndex(self.speech.variant.findData(voice))
+                    self.speech.mode.setCurrentIndex(1)
+                else:
+                    self.speech.mode.setCurrentIndex(0)
+            finally:
+                for widget, previous in blocked:
+                    widget.blockSignals(previous)
+            if valid_demand:
+                demands = self.store.get("model_demands", {})
+                demands[model] = demand
+                self.store.set("model_demands", demands)
             self.speech.update_recommendations()
             self.speech.save()
             if voice not in {"0.6B","1.7B"} and self.speech.service.owned:

@@ -4,13 +4,14 @@ import shutil
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtCore import QTimer, QUrl, Qt
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+    QPushButton, QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
-from .hardware import detect, recommend, free_disk, ollama_models_dir
+from .hardware import (detect, recommend, free_disk, ollama_models_dir, GRADE_LABELS,
+                       CONVERSATION_CONTEXTS, CONVERSATION_RESERVES)
 from .gguf import install_gguf, is_supported
 from .i18n import tr
 from .network import Client, connect_local, verify_local_model
@@ -26,6 +27,7 @@ class SpeechPanel(QWidget):
         self.records = SpeechRecords(self.store)
         self.hw = None
         self.plan = None
+        self._busy = False
         self.run_id = None
         self.run_result = {"paths": [], "metrics": []}
         self.pending_auto = None
@@ -81,16 +83,65 @@ class SpeechPanel(QWidget):
             self.preference.addItem(label, value)
         self.preference.setCurrentIndex(max(0, self.preference.findData(self.settings.get("preference", "quality"))))
         form.addRow("推荐偏好", self.preference)
-        self.capacity = QComboBox()
+        self.capacity = QComboBox(self)
         for title,value in [("大体量 · 4K 上下文","large"),("大上下文 · 16K","context")]:
             self.capacity.addItem(title,value)
         self.capacity.setCurrentIndex(max(0,self.capacity.findData(self.settings.get("capacity","large"))))
-        form.addRow("容量模式",self.capacity)
+        self.capacity.hide()  # Kept for legacy MD-plan imports; sliders are the visible controls.
+        self.compression_slider = QSlider(Qt.Orientation.Horizontal)
+        self.compression_slider.setRange(1, 5)
+        self.compression_slider.setSingleStep(1)
+        self.compression_slider.setPageStep(1)
+        self.compression_slider.setTickInterval(1)
+        self.compression_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.compression_slider.setValue(self.saved_level(self.settings.get("compression_level"), 3))
+        self.compression_value = QLabel()
+        self.compression_value.setWordWrap(True)
+        compression_box = QVBoxLayout()
+        compression_box.addWidget(self.compression_slider)
+        compression_ends = QHBoxLayout()
+        for text in ["精简省资源", "BF16 完全体"]:
+            endpoint = QLabel(text)
+            endpoint.setObjectName("muted")
+            compression_ends.addWidget(endpoint)
+            if text == "精简省资源":
+                compression_ends.addStretch()
+        compression_box.addLayout(compression_ends)
+        compression_box.addWidget(self.compression_value)
+        form.addRow("精简程度", compression_box)
+        self.conversation_slider = QSlider(Qt.Orientation.Horizontal)
+        self.conversation_slider.setRange(1, 5)
+        self.conversation_slider.setSingleStep(1)
+        self.conversation_slider.setPageStep(1)
+        self.conversation_slider.setTickInterval(1)
+        self.conversation_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        legacy_demand = 4 if self.settings.get("capacity") == "context" else 2
+        self.conversation_slider.setValue(self.saved_level(self.settings.get("conversation_demand"), legacy_demand))
+        self.conversation_value = QLabel()
+        self.conversation_value.setWordWrap(True)
+        conversation_box = QVBoxLayout()
+        conversation_box.addWidget(self.conversation_slider)
+        conversation_ends = QHBoxLayout()
+        for text in ["短聊 · 基础记忆", "长聊 · 记忆优先"]:
+            endpoint = QLabel(text)
+            endpoint.setObjectName("muted")
+            conversation_ends.addWidget(endpoint)
+            if text == "短聊 · 基础记忆":
+                conversation_ends.addStretch()
+        conversation_box.addLayout(conversation_ends)
+        conversation_box.addWidget(self.conversation_value)
+        form.addRow("对话与记忆需求", conversation_box)
         box.addLayout(form)
-        self.compression_note = QLabel("同 27B 低比特压缩，不是小参数替代。文件大小不等于显存；校验缓存与 Ollama 模型占用两份磁盘。CPU 默认不推荐过大的模型，本地语音仍需额外资源。")
+        slider_note = QLabel("拖动仅更新推荐；点击下载才部署。对话需求从短聊基础记忆到长聊记忆优先，不代表记忆准确率保证。")
+        slider_note.setWordWrap(True)
+        box.addWidget(slider_note)
+        self.grade_options = QLabel()
+        self.grade_options.setWordWrap(True)
+        box.addWidget(self.grade_options)
+        self.compression_note = QLabel("同一 27B 模型，1–4 档为不同量化，5 档为 BF16 原精度文字权重，不含视觉投影。文件大小不等于显存；缓存和模型需双份磁盘，语音另留资源。")
         self.compression_note.setWordWrap(True)
         box.addWidget(self.compression_note)
-        self.compression_source = QLabel('<a href="https://huggingface.co/ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF">GSQ + RCO 官方模型与文件来源 ↗</a>')
+        self.compression_source = QLabel('<a href="https://huggingface.co/ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF">GSQ + RCO 压缩来源 ↗</a> · <a href="https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF">Q4 / Q8 / BF16 来源 ↗</a>')
         self.compression_source.setOpenExternalLinks(True)
         self.compression_source.setWordWrap(True)
         box.addWidget(self.compression_source)
@@ -228,15 +279,18 @@ class SpeechPanel(QWidget):
         box.addWidget(self.history)
         box.addStretch()
         self.refresh_history()
-        for combo in [self.variant, self.usage, self.preference, self.capacity]:
+        for combo in [self.variant, self.usage, self.preference]:
             combo.currentIndexChanged.connect(self.update_recommendations)
+        self.compression_slider.valueChanged.connect(self.sliders_changed)
+        self.conversation_slider.valueChanged.connect(self.sliders_changed)
+        self.capacity.currentIndexChanged.connect(self.legacy_capacity_changed)
         self.remote_text.toggled.connect(self.update_recommendations)
         self.mode.currentIndexChanged.connect(self.mode_changed)
         self.rate.valueChanged.connect(self.player.setPlaybackRate)
         self.volume.valueChanged.connect(lambda value:self.audio.setVolume(value / 100))
         self.player.setPlaybackRate(self.rate.value())
         self.audio.setVolume(self.volume.value() / 100)
-        self.update_compression_notice()
+        self.update_recommendations()
 
     @staticmethod
     def button(text, callback, layout):
@@ -245,14 +299,56 @@ class SpeechPanel(QWidget):
         layout.addWidget(button)
         return button
 
+    @staticmethod
+    def saved_level(value, default):
+        if isinstance(value, bool):
+            return default
+        try:
+            value = int(value)
+        except (ValueError, TypeError):
+            return default
+        return value if 1 <= value <= 5 else default
+
+    def sliders_changed(self, value=None):
+        blocked = self.capacity.blockSignals(True)
+        self.capacity.setCurrentIndex(self.capacity.findData("context" if self.conversation_slider.value() >= 4 else "large"))
+        self.capacity.blockSignals(blocked)
+        self.update_recommendations()
+
+    def legacy_capacity_changed(self):
+        value = 4 if self.capacity.currentData() == "context" else 2
+        if self.conversation_slider.value() != value:
+            self.conversation_slider.setValue(value)
+        else:
+            self.update_recommendations()
+
+    def update_slider_state(self):
+        idle = not self._busy and not self.window.job
+        local = not self.remote_text.isChecked()
+        self.compression_slider.setEnabled(idle and local and self.usage.currentData() == "compressed")
+        self.conversation_slider.setEnabled(idle and local)
+        self.text_deploy.setEnabled(idle and local and self.plan is not None)
+
+    def update_slider_labels(self):
+        compression = self.compression_slider.value()
+        self.compression_value.setText(tr("{0} 档 · {1}").format(compression, tr(GRADE_LABELS[compression])))
+        demand = self.conversation_slider.value()
+        names = {1: "短聊 · 基础记忆", 2: "日常对话", 3: "连续聊天", 4: "长聊", 5: "长聊 · 记忆优先"}
+        if self.remote_text.isChecked():
+            self.conversation_value.setText(tr("本地偏好已保留；API 上下文跟随供应商设置。"))
+        else:
+            self.conversation_value.setText(tr("{0} 档 · {1} · {2}K 上下文").format(demand, tr(names[demand]), CONVERSATION_CONTEXTS[demand] // 1024))
+
     def reload_settings(self):
         self.settings = self.store.get("speech", {})
         if not isinstance(self.settings, dict):
             self.settings = {}
 
     def snapshot(self):
-        return {"enabled": self.mode.currentData(), "variant": self.variant.currentData(),
-            "capacity": self.capacity.currentData(), "usage": self.usage.currentData(), "preference": self.preference.currentData(),
+        return {**self.settings, "enabled": self.mode.currentData(), "variant": self.variant.currentData(),
+            "capacity": "context" if self.conversation_slider.value() >= 4 else "large",
+            "compression_level": self.compression_slider.value(), "conversation_demand": self.conversation_slider.value(),
+            "usage": self.usage.currentData(), "preference": self.preference.currentData(),
             "remote_text": self.remote_text.isChecked(),
             "python": self.python_path.text().strip(), "source": self.source.currentData(),
             "torch_wheel": self.torch_wheel.text().strip(),
@@ -273,10 +369,12 @@ class SpeechPanel(QWidget):
             return False
 
     def busy(self, value):
+        self._busy = value
         for widget in [self.scan_button, self.text_deploy, self.install_button, self.start_button,
                        self.stop_service_button, self.read_button, self.selection_button,
                        self.mode, self.variant, self.usage, self.preference, self.source, self.history, self.remote_text, self.capacity]:
             widget.setEnabled(not value)
+        self.update_slider_state()
 
     def scan(self):
         self.window.run_job(lambda j: detect(self.service.root), self.scanned, "hardware")
@@ -293,33 +391,60 @@ class SpeechPanel(QWidget):
             return None
         same_disk = self.service.root.resolve().anchor.lower() == ollama_models_dir().resolve().anchor.lower()
         return recommend(self.hw, voice, self.variant.currentData(), self.usage.currentData(),
-                         self.preference.currentData(), same_disk, self.remote_text.isChecked(), self.capacity.currentData())
+                         self.preference.currentData(), same_disk, self.remote_text.isChecked(), self.capacity.currentData(),
+                         compression_level=self.compression_slider.value(), conversation_demand=self.conversation_slider.value())
 
     def describe(self, plan):
         if not plan:
-            return tr("当前配置没有安全的同时运行推荐。请释放资源，或使用 API 文字聊天。")
+            return tr("当前对话需求或语音预算无法满足；不会自动缩短上下文。请降低对话需求、关闭语音或释放资源。")
         voice = "Qwen3-TTS " + plan["voice"] if plan["voice"] else tr("不开语音")
-        description = str(plan["context"]) + " tokens · " + tr("文字：{0} · 语音：{1} · 文字预算 {2} GiB · 为语音预留显存 {3} GiB / 内存 {4} GiB").format(
+        context = tr("API 上下文跟随供应商设置") if plan["text"] == "API" else str(plan["context"]) + " tokens"
+        description = context + " · " + tr("文字：{0} · 语音：{1} · 文字预算 {2} GiB · 为语音预留显存 {3} GiB / 内存 {4} GiB").format(
             plan["text"], voice, plan["budget"], plan["reserve_gpu"], plan["reserve_ram"])
         if plan.get("method"):
             description += "\n" + tr("压缩方式：{0} · 基础模型 {1} · 量化 {2} · 下载估算 {3} GiB").format(
-                plan["method"], plan["base_model"], plan["quantization"], plan["download"])
+                tr(plan["method"]), plan["base_model"], plan["quantization"], plan["download"])
+        if plan.get("compression_level"):
+            description += "\n" + tr("目标 {0} 档 → 可推荐 {1} 档").format(plan["compression_level"], plan["effective_compression_level"])
+            if plan.get("fallback_reason"):
+                description += "\n" + tr(plan["fallback_reason"])
+        if plan.get("conversation_demand"):
+            description += "\n" + tr("对话需求 {0} 档 · 上下文额外预留 {1} GiB").format(plan["conversation_demand"], plan["context_reserve"])
         return description
 
     def update_compression_notice(self):
         visible = self.usage.currentData() == "compressed"
         self.compression_note.setVisible(visible)
         self.compression_source.setVisible(visible)
+        self.grade_options.setVisible(visible and not self.remote_text.isChecked())
 
     def update_recommendations(self):
+        self.update_slider_labels()
         self.update_compression_notice()
+        self.store.set("speech", self.snapshot())
         if not self.hw:
+            self.grade_options.setText(tr("检测硬件后显示五档可行性。"))
+            self.update_slider_state()
             return
         self.without.setText(tr("不开语音方案：") + self.describe(self.get_plan(False)))
         self.with_voice.setText(tr("开语音方案：") + self.describe(self.get_plan(True)))
         self.plan = self.get_plan(bool(self.mode.currentData()))
-        self.text_deploy.setEnabled(not self.window.job and not self.remote_text.isChecked())
-        self.store.set("speech", self.snapshot())
+        if self.usage.currentData() == "compressed" and not self.remote_text.isChecked():
+            same_disk = self.service.root.resolve().anchor.lower() == ollama_models_dir().resolve().anchor.lower()
+            states = []
+            for grade in range(1, 6):
+                choice = recommend(self.hw, bool(self.mode.currentData()), self.variant.currentData(), "compressed",
+                    self.preference.currentData(), same_disk, False, self.capacity.currentData(),
+                    compression_level=grade, conversation_demand=self.conversation_slider.value())
+                if choice is None:
+                    state = tr("不足")
+                elif choice["effective_compression_level"] < grade:
+                    state = tr("需降至 {0} 档").format(choice["effective_compression_level"])
+                else:
+                    state = tr("可行")
+                states.append(tr("{0} 档：{1}").format(grade, state))
+            self.grade_options.setText(" · ".join(states))
+        self.update_slider_state()
 
     def mode_changed(self):
         self.update_recommendations()
@@ -403,6 +528,10 @@ class SpeechPanel(QWidget):
             contexts=self.store.get("model_contexts",{})
             contexts[tag]=plan["context"]
             self.store.set("model_contexts",contexts)
+            demands = self.store.get("model_demands", {})
+            if plan.get("conversation_demand") is not None:
+                demands[tag] = plan["conversation_demand"]
+                self.store.set("model_demands", demands)
             self.store.set("model", tag)
             self.window.engine.local_model = tag
             self.info.setText(tr("文字模型下载完成，请在连接设置刷新并选择。"))

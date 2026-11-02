@@ -41,8 +41,10 @@ def build_snapshot(store, persona_id, context, summary="", include_persona=True)
     memories = ["用户自行填写的资料：" + profile] if profile else []
     budget = Budget(context)
 
-    def render(rows):
-        return system_prompt(persona, rows, summary=summary, response_language=language)
+    knowledge = []
+
+    def render(rows, terms=None):
+        return system_prompt(persona, rows, knowledge=knowledge if terms is None else terms, summary=summary, response_language=language)
 
     system = render(memories)
     if not budget.check(_messages(system))[0]:
@@ -60,10 +62,21 @@ def build_snapshot(store, persona_id, context, summary="", include_persona=True)
             system = candidate
         else:
             omitted.append(row["id"])
+    included_terms, omitted_terms = [], []
+    for row in store.items("knowledge", "approved"):
+        entry = {k: row[k] for k in ("term", "definition", "example")}
+        candidate = render(memories, knowledge + [entry])
+        if budget.check(_messages(candidate))[0]:
+            knowledge.append(entry)
+            included_terms.append(row["id"])
+            system = candidate
+        else:
+            omitted_terms.append(row["id"])
     material = json.dumps({"schema": 1, "system": system, "context": context},
                           ensure_ascii=False, sort_keys=True).encode("utf-8")
     return {"system": system, "fingerprint": hashlib.sha256(material).hexdigest(),
             "context": context, "included_ids": included, "omitted_ids": omitted,
+            "included_knowledge_ids": included_terms, "omitted_knowledge_count": len(omitted_terms),
             "omitted_count": len(omitted), "summary_included": bool(summary),
             "include_persona": include_persona, "profile_included": bool(profile),
             "used": message_cost(_messages(system)),

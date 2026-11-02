@@ -243,6 +243,8 @@ class Store:
     def save_personal_model(self, name, base_model, persona_id, source_session, context, snapshot, verified=True):
         # Contents already exist in the user's SQLite store; only metadata is duplicated here.
         manifest = {k: snapshot[k] for k in ("included_ids", "omitted_count", "include_persona", "summary_included")}
+        manifest["included_knowledge_ids"] = snapshot.get("included_knowledge_ids", [])
+        manifest["omitted_knowledge_count"] = snapshot.get("omitted_knowledge_count", 0)
         manifest["verified"] = verified
         return self.execute("INSERT INTO personal_models(name,base_model,persona_id,source_session,context,fingerprint,manifest,created) VALUES (?,?,?,?,?,?,?,?)",
             (name, base_model, persona_id, source_session, context, snapshot["fingerprint"], json.dumps(manifest), time.time()))

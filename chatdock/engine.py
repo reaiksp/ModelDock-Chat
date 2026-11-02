@@ -4,8 +4,9 @@ import re
 import time
 import uuid
 
-from .context import Budget, clip, estimate, message_cost, retrieve, split_text, system_prompt
-from .network import Cancelled, Client, OpenAIClient, Task, create_variant
+from .context import (Budget, CONVERSATION_POLICIES, DEFAULT_CONVERSATION_POLICY,
+                      clip, estimate, message_cost, retrieve, split_text, system_prompt)
+from .network import Cancelled, Client, OpenAIClient, Task, create_variant, model_key
 from .i18n import response_policy, adapt_user_message
 
 
@@ -56,14 +57,53 @@ class Engine:
     def budget(self):
         return Budget(min(self.context, self.model_limit))
 
+    @property
+    def conversation_policy(self):
+        """Only an applied/deployed model plan activates a demand policy.
+
+        Merely moving the recommendation slider does not alter a live model,
+        API route, context allocation, or its existing memory behavior.
+        """
+        if self.backend != "local":
+            return dict(DEFAULT_CONVERSATION_POLICY, level=None)
+        demands = self.store.get("model_demands", {})
+        level = demands.get(self.model) if isinstance(demands, dict) else None
+        if level is None and isinstance(demands, dict):
+            level = next((v for k, v in demands.items()
+                          if isinstance(k, str) and model_key(k) == model_key(self.model)), None)
+        valid = isinstance(level, int) and not isinstance(level, bool) and level in CONVERSATION_POLICIES
+        return dict(CONVERSATION_POLICIES[level] if valid else DEFAULT_CONVERSATION_POLICY,
+                    level=level if valid else None)
+
     def prompt_data(self, session_id, text):
         session = self.store.session(session_id)
         persona = self.store.persona(session["persona_id"])["prompt"]
-        memories, knowledge = retrieve(self.store, text)
+        policy = self.conversation_policy
+        memories, knowledge = retrieve(self.store, text, total_budget=policy["knowledge"],
+                                       memory_budget=policy["memory"])
         user_profile = self.store.get("user_profile", "")
-        if user_profile:
-            memories = ["用户自行填写的资料：" + user_profile] + memories
-        return session, persona, memories, knowledge
+        mandatory = ["用户自行填写的资料：" + user_profile] if user_profile else []
+        if policy["level"] is None:
+            return session, persona, mandatory + memories, knowledge
+
+        # Optional references must not turn a valid current request into an
+        # oversized one. Persona/profile/current input stay complete, even when
+        # mandatory material itself is too large (the normal budget check warns).
+        selected_memories, selected_knowledge = list(mandatory), []
+        user = {"role": "user", "content": adapt_user_message(text, self.store.get("response_language", "auto"))}
+        limit = max(0, self.budget.input_limit - min(256, self.budget.context // 16))
+        for index in range(max(len(memories), len(knowledge))):
+            # Alternate relevant terminology and approved facts to keep one kind
+            # of optional reference from monopolizing a small remaining budget.
+            for kind, records in (("knowledge", knowledge), ("memory", memories)):
+                if index >= len(records):
+                    continue
+                candidate_memories = selected_memories + ([records[index]] if kind == "memory" else [])
+                candidate_knowledge = selected_knowledge + ([records[index]] if kind == "knowledge" else [])
+                candidate = [{"role": "system", "content": self.system_prompt(persona, candidate_memories, candidate_knowledge)}, user]
+                if message_cost(candidate) <= limit:
+                    selected_memories, selected_knowledge = candidate_memories, candidate_knowledge
+        return session, persona, selected_memories, selected_knowledge
 
     def history(self, session_id):
         return [{"role": m["role"], "content": m["content"]}
@@ -73,7 +113,7 @@ class Engine:
         # Summarize before exhausting the window, while reserving the usual reply budget.
         used = message_cost(messages)
         room = self.budget.input_limit - message_cost([messages[0], messages[-1]])
-        return used > self.budget.input_limit or (bool(history) and room >= 300 and used >= self.budget.input_limit * .9)
+        return used > self.budget.input_limit or (bool(history) and room >= 300 and used >= self.budget.input_limit * self.conversation_policy["rollover"])
 
     def reinforce(self, messages, raw_text):
         """Optionally repeat one short local request without changing source text.
@@ -134,7 +174,8 @@ class Engine:
                         {"role": "user", "content": "已有摘要：" + summary + "\n历史：\n" + chunk}]
             self.budget.require(messages)
             result = self.client.chat(self.model, messages, task, lambda _: None,
-                                      context=self.budget.context, reply=256)
+                                      context=self.budget.context, reply=(min(self.budget.reply, max(256, allowance))
+                                          if self.conversation_policy["level"] else 256))
             if not result.strip():
                 raise RuntimeError("续聊摘要为空，原始对话已保留，请重试。")
             summary = clip(result.strip(), allowance)
@@ -154,7 +195,7 @@ class Engine:
         summary = session["summary"]
         messages = [{"role": "system", "content": self.system_prompt(persona, memories, knowledge, summary)}] + history + single[1:]
         if self.should_rollover(messages, history):
-            allowance = min(600, self.budget.input_limit - message_cost(single) - 180)
+            allowance = min(self.conversation_policy["summary"], self.budget.input_limit - message_cost(single) - 180)
             if allowance < 100:
                 raise ValueError("单条消息虽可容纳，但没有续聊摘要空间。请再缩短消息或人格提示词。")
             summary = self.summarize(history, summary, task, emit, allowance)

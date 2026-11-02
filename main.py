@@ -60,7 +60,10 @@ def main():
                 "english_ui": "Chat" in window.nav[0].text(), "independent_database": True,
                 "private_memory_controls": "Preview" in window.personal_preview.text(),
                 "private_memory_default_off": not window.personal_auto.isChecked(),
-                "input_limit": window.engine.budget.input_limit}, indent=2), "utf-8")
+                "input_limit": window.engine.budget.input_limit,
+                "compression_steps": [window.speech.compression_slider.minimum(), window.speech.compression_slider.maximum()],
+                "conversation_steps": [window.speech.conversation_slider.minimum(), window.speech.conversation_slider.maximum()],
+                "explicit_download_control": bool(window.speech.text_deploy.text())}, indent=2), "utf-8")
             window.close()
             app.quit()
         QTimer.singleShot(1000, check)

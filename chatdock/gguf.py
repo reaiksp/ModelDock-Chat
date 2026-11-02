@@ -31,7 +31,19 @@ for quant, size, digest in [
     filename = "Qwen3.8-27B-GSQ-RCO-" + quant + ".gguf"
     tag = "hf.co/" + REPO + ":" + filename
     FILES[tag.casefold()] = {"tag": tag, "filename": filename, "size": size,
-        "sha256": digest, "revision": REVISION}
+        "sha256": digest, "revision": REVISION, "repo": REPO}
+
+
+# Higher-precision text weights of the same base; fixed, non-MTP files.
+for filename, size, digest in [
+    ("Qwen3.8-27B-Q4_K_M.gguf", 18973870528, "c600de0300ae8a0eb3a6c0b8b5561b8b96f16bd2c863c2a66c42de29d391a747"),
+    ("Qwen3.8-27B-Q8_0.gguf", 28595763648, "aab65c67ef0dad127960efef9247f1832bca105faa1c7a052cc039b223cf86a1"),
+    ("Qwen3.8-27B-BF16.gguf", 53808282048, "222e1905eef352bae7c06f3d17dd9385bcb2ee96f435573d18457c7ad1002894"),
+]:
+    repo = "ggml-org/Qwen3.8-27B-GGUF"
+    tag = "hf.co/" + repo + ":" + filename
+    FILES[tag.casefold()] = {"tag": tag, "filename": filename, "size": size,
+        "sha256": digest, "revision": "a316ea527fde32c12487be7574e2db5ac2ad2a7e", "repo": repo}
 
 
 def is_supported(tag):
@@ -40,7 +52,7 @@ def is_supported(tag):
 
 def _spec(tag):
     if not is_supported(tag):
-        raise ValueError("仅支持已核对的四个 GSQ/RCO 完整文件标签。")
+        raise ValueError("仅支持已核对的量化或 BF16 完整文件标签。")
     return FILES[tag.casefold()]
 
 
@@ -135,7 +147,7 @@ def _progress(callback, percent, message):
 def _download(spec, path, task, log, progress):
     task.check()
     partial = path.with_name(path.name + ".part")
-    url = "https://huggingface.co/" + REPO + "/resolve/" + spec["revision"] + "/" + spec["filename"] + "?download=true"
+    url = "https://huggingface.co/" + spec["repo"] + "/resolve/" + spec["revision"] + "/" + spec["filename"] + "?download=true"
     downloaded, digest = 0, hashlib.sha256()
     if partial.is_file() and 0 < partial.stat().st_size < spec["size"]:
         # This prefix is not trusted: the complete file must still match SHA-256.

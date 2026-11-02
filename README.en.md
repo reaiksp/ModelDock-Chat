@@ -6,7 +6,17 @@
 
 Development assistance: **OpenAI Codex**. The initial application code and documentation were developed with Codex assistance.
 
-Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.6.0 experimental**.
+Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.0 experimental**.
+
+## Two recommendation sliders (0.7.0)
+
+**Compression → full precision** has five same-27B choices: IQ2_XS, IQ3_XXS, Q4_K_M, Q8_0 and true BF16 text weights. **Conversation length & memory requirement** selects 4K / 4K / 8K / 16K / 32K and corresponding memory-retrieval/summary budgets. Neither slider is a measured quality score or an accuracy guarantee.
+
+Hardware, disk, context and speech are assessed together. The requested precision stays visible; a lower feasible recommendation is clearly identified. If no precision fits the requested conversation requirement, no plan is offered. API text is not relabeled by the local sliders. Dragging only updates recommendations; downloading requires an explicit button click.
+
+After a successful local deployment or explicit MD plan import, MDC applies the selected model's memory strategy. User text, personas, profile, evidence and complete stored history are preserved. Approved memory and approved slang can be included together in a private Ollama default-prompt snapshot; pending material is excluded. This is not weight training.
+
+[Definitions, resource policy and verification](docs/DUAL_SLIDERS.md)
 
 ## Same-model compression (0.6.0 experiment)
 
