@@ -1,3 +1,4 @@
+import copy
 import json
 import re
 import time
@@ -74,19 +75,45 @@ class Engine:
         room = self.budget.input_limit - message_cost([messages[0], messages[-1]])
         return used > self.budget.input_limit or (bool(history) and room >= 300 and used >= self.budget.input_limit * .9)
 
+    def reinforce(self, messages, raw_text):
+        """Optionally repeat one short local request without changing source text.
+
+        This experiment never expands the context window. If the extra copy does
+        not fit, the original request remains usable and is returned unchanged.
+        """
+        copied = copy.deepcopy(messages)
+        label = "[短请求复述一次，只需回答一次]"
+        marker = label + "\n"
+        if (self.backend != "local" or not self.store.get("repeat_short_prompt", False)
+                or not isinstance(raw_text, str) or not raw_text.strip()
+                or estimate(raw_text) > 160 or not copied
+                or copied[-1].get("role") != "user"
+                or not isinstance(copied[-1].get("content"), str)
+                or not copied[-1]["content"].startswith(raw_text)
+                or label in raw_text or label in copied[-1]["content"]):
+            return copied, False
+        candidate = copy.deepcopy(copied)
+        candidate[-1]["content"] += "\n\n" + marker + raw_text
+        if not self.budget.check(candidate)[0]:
+            return copied, False
+        return candidate, True
+
     def preview(self, session_id, text):
         session, persona, memories, knowledge = self.prompt_data(session_id, text)
         system = self.system_prompt(persona, memories, knowledge, session["summary"])
         single = [{"role": "system", "content": system}, {"role": "user", "content": adapt_user_message(text,self.store.get("response_language","auto"))}]
         history = self.history(session_id)
-        used = message_cost(single[:1] + history + single[1:])
+        original = single[:1] + history + single[1:]
+        messages, reinforced = self.reinforce(original, text)
+        used = message_cost(messages)
         # A continuation can replace the old summary with a smaller summary.
         minimal = [{"role": "system", "content": self.system_prompt(persona, memories, knowledge)}, single[1]]
         single_used = message_cost(minimal)
         return {"used": used, "limit": self.budget.input_limit, "single": single_used,
                 "remaining": max(0, self.budget.input_limit - single_used),
                 "too_long": single_used > self.budget.input_limit,
-                "rollover": self.should_rollover(single[:1] + history + single[1:], history) and single_used <= self.budget.input_limit,
+                "rollover": self.should_rollover(original, history) and single_used <= self.budget.input_limit,
+                "reinforced": reinforced,
                 "knowledge": [k["term"] for k in knowledge]}
 
     def summarize(self, history, prior, task, emit, allowance=600):
@@ -146,6 +173,9 @@ class Engine:
                 # A snapshot failure must not disable chat or promote a failed version.
                 self.store.set("personal_model_error", str(exc))
                 emit("status", "私有模型更新失败，继续使用应用内记忆与摘要。")
+        messages, reinforced = self.reinforce(messages, text)
+        if reinforced:
+            emit("status", "已按预算复述一次短请求（实验）。")
         task.check()
         user_id = self.store.add_message(session_id, "user", text, "pending")
         if not self.store.messages(session_id)[:-1] and not self.store.session(session_id)["parent_id"]:

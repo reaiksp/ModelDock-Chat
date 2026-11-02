@@ -258,6 +258,10 @@ class Window(QMainWindow):
                 return
             self.speech.read_message(ident)
 
+    def save_repeat_prompt(self, enabled):
+        self.store.set("repeat_short_prompt", enabled)
+        self.update_counter()
+
     def save_reply_language(self):
         self.store.set('response_language',self.reply_language.currentData())
         self.update_counter()
@@ -1342,6 +1346,11 @@ class Window(QMainWindow):
         reply_row.addWidget(self.reply_language)
         col.addLayout(reply_row)
         col.addWidget(label("切换界面不会改写草稿、人格、记忆或回复语言偏好。" , "muted", True))
+        self.repeat_prompt = QCheckBox("短请求复述一次（实验，仅本机）")
+        self.repeat_prompt.setChecked(bool(self.store.get("repeat_short_prompt", False)))
+        self.repeat_prompt.toggled.connect(self.save_repeat_prompt)
+        col.addWidget(self.repeat_prompt)
+        col.addWidget(label("仅复述不超过 160 个 UTF-8 字节的当前请求；预算不足则跳过。不会重复长历史、修改原文或扩大上下文；效果尚待不同量化模型验证。", "muted", True))
         col.addWidget(label("上下文越大，占用内存 / 显存越多。计数使用 UTF-8 字节保守估算与消息开销，不冒充模型精确 tokenizer；还会预留回复和安全空间。超长历史自动摘要续聊，单条超限会保留原文并阻止发送。", "muted", True))
         box.addWidget(frame)
         frame, col = card()

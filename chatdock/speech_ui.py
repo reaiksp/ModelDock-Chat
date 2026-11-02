@@ -11,8 +11,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
     QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from .hardware import detect, recommend, free_disk, ollama_models_dir
+from .gguf import install_gguf, is_supported
 from .i18n import tr
-from .network import Client, connect_local
+from .network import Client, connect_local, verify_local_model
 from .speech import (SpeechRecords, SpeechService, readout_text, SPEAKERS, LANGUAGES,
                      run_command)
 
@@ -68,6 +69,7 @@ class SpeechPanel(QWidget):
         self.usage = QComboBox()
         self.usage.addItem("通用对话", "chat")
         self.usage.addItem("代码开发", "code")
+        self.usage.addItem("压缩大模型", "compressed")
         self.usage.setCurrentIndex(max(0, self.usage.findData(self.settings.get("usage", "chat"))))
         form.addRow("文字模型用途", self.usage)
         self.remote_text = QCheckBox("文字聊天使用 API，本机只运行语音")
@@ -85,6 +87,13 @@ class SpeechPanel(QWidget):
         self.capacity.setCurrentIndex(max(0,self.capacity.findData(self.settings.get("capacity","large"))))
         form.addRow("容量模式",self.capacity)
         box.addLayout(form)
+        self.compression_note = QLabel("同 27B 低比特压缩，不是小参数替代。文件大小不等于显存；校验缓存与 Ollama 模型占用两份磁盘。CPU 默认不推荐过大的模型，本地语音仍需额外资源。")
+        self.compression_note.setWordWrap(True)
+        box.addWidget(self.compression_note)
+        self.compression_source = QLabel('<a href="https://huggingface.co/ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF">GSQ + RCO 官方模型与文件来源 ↗</a>')
+        self.compression_source.setOpenExternalLinks(True)
+        self.compression_source.setWordWrap(True)
+        box.addWidget(self.compression_source)
         self.hardware = QLabel("点击检测，比较开语音与不开语音两套方案。")
         self.hardware.setWordWrap(True)
         box.addWidget(self.hardware)
@@ -227,6 +236,7 @@ class SpeechPanel(QWidget):
         self.volume.valueChanged.connect(lambda value:self.audio.setVolume(value / 100))
         self.player.setPlaybackRate(self.rate.value())
         self.audio.setVolume(self.volume.value() / 100)
+        self.update_compression_notice()
 
     @staticmethod
     def button(text, callback, layout):
@@ -289,10 +299,20 @@ class SpeechPanel(QWidget):
         if not plan:
             return tr("当前配置没有安全的同时运行推荐。请释放资源，或使用 API 文字聊天。")
         voice = "Qwen3-TTS " + plan["voice"] if plan["voice"] else tr("不开语音")
-        return str(plan["context"]) + " tokens · " + tr("文字：{0} · 语音：{1} · 文字预算 {2} GiB · 为语音预留显存 {3} GiB / 内存 {4} GiB").format(
+        description = str(plan["context"]) + " tokens · " + tr("文字：{0} · 语音：{1} · 文字预算 {2} GiB · 为语音预留显存 {3} GiB / 内存 {4} GiB").format(
             plan["text"], voice, plan["budget"], plan["reserve_gpu"], plan["reserve_ram"])
+        if plan.get("method"):
+            description += "\n" + tr("压缩方式：{0} · 基础模型 {1} · 量化 {2} · 下载估算 {3} GiB").format(
+                plan["method"], plan["base_model"], plan["quantization"], plan["download"])
+        return description
+
+    def update_compression_notice(self):
+        visible = self.usage.currentData() == "compressed"
+        self.compression_note.setVisible(visible)
+        self.compression_source.setVisible(visible)
 
     def update_recommendations(self):
+        self.update_compression_notice()
         if not self.hw:
             return
         self.without.setText(tr("不开语音方案：") + self.describe(self.get_plan(False)))
@@ -367,12 +387,18 @@ class SpeechPanel(QWidget):
                 cli = str(candidate) if candidate.is_file() else None
             if not cli:
                 raise ValueError("未找到 Ollama CLI，请安装 Ollama 后重试。")
-            job.event.emit("speech_status", tr("正在通过 Ollama CLI 下载文字模型…"))
+            job.event.emit("speech_status", tr("正在校验并导入压缩文字模型…" if is_supported(plan["text"]) else "正在通过 Ollama CLI 下载文字模型…"))
             # Download command uses a catalog tag, never arbitrary user shell input.
             env = os.environ.copy()
             env["OLLAMA_HOST"] = "127.0.0.1:11434"
-            run_command([cli, "pull", plan["text"]], job.task, lambda text:job.event.emit("speech_status",text), env=env)
-            return plan["text"]
+            if is_supported(plan["text"]):
+                installed_tag = install_gguf(plan["text"], cli, ollama_models_dir() / ".modeldock-gguf",
+                    job.task, lambda text:job.event.emit("speech_status", text))
+            else:
+                run_command([cli, "pull", plan["text"]], job.task, lambda text:job.event.emit("speech_status",text), env=env)
+                installed_tag = plan["text"]
+            job.event.emit("speech_status", tr("下载完成，正在验证模型元数据与实际加载…"))
+            return verify_local_model(Client(), installed_tag, plan["context"], job.task)
         def done(tag):
             contexts=self.store.get("model_contexts",{})
             contexts[tag]=plan["context"]

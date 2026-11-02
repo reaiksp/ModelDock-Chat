@@ -345,3 +345,32 @@ def create_variant(client, base, name, system, task, context):
     if result.get("status") != "success":
         raise RuntimeError("Ollama 未确认派生模型创建成功。")
     return name
+
+
+
+def model_key(name):
+    """Ollama canonical names may lowercase a full Hugging Face filename tag."""
+    name = name.strip().casefold()
+    if name.startswith("huggingface.co/"):
+        name = "hf.co/" + name[len("huggingface.co/"):]
+    return name if ":" in name.rsplit("/", 1)[-1] else name + ":latest"
+
+
+def verify_local_model(client, tag, context, task):
+    task.check()
+    rows = client.request("/api/tags", task=task).get("models", [])
+    row = next((m for m in rows if model_key(m.get("name", "")) == model_key(tag)), None)
+    if not row or row.get("remote_host") or row.get("remote_model") or ":cloud" in tag.casefold():
+        raise RuntimeError("下载结束但未确认本机权重模型，请刷新或重试。")
+    actual = row["name"]
+    info = client.request("/api/show", {"model": actual}, task)
+    limits = [int(v) for k, v in info.get("model_info", {}).items()
+              if k.endswith(".context_length") and isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0]
+    if info.get("remote_host") or info.get("remote_model") or context > (min(limits) if limits else 4096):
+        raise RuntimeError("模型元数据不能确认所选本地上下文，请改用较小上下文。")
+    result = client.request("/api/generate", {"model": actual, "prompt": "", "stream": False,
+        "keep_alive": "5m", "options": {"num_ctx": context}}, task, timeout=180)
+    task.check()
+    if not result.get("done"):
+        raise RuntimeError("模型实际加载未完成，未保存成功部署状态。")
+    return actual

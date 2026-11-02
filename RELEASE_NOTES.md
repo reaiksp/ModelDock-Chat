@@ -1,3 +1,27 @@
+# ModelDock Chat 0.6.0 · 同参数大模型压缩实验
+
+- 新增 Qwen3.8-27B 的 GSQ-RCO 四档低比特 GGUF，不通过换成小参数模型实现低配方案。
+- 固定版本及校验后 Ollama CLI 导入文字 GGUF；实际加载成功才保存部署状态。
+- 保留 4K / 16K、API、记忆、人格与本地语音预算；资源不足明确拒绝对应压缩方案。
+- 默认关闭的短请求复述实验，至多一次且受上下文预算约束；原始文字不改写，不宣称可以恢复量化损失。
+- 中文与英文界面、README 及精确来源同步更新。
+
+详情：[模型来源与验证边界](docs/COMPRESSED_MODELS.md)。
+
+配套：[MD](https://github.com/reaiksp/ModelDock-Windows) · [MDC](https://github.com/reaiksp/ModelDock-Chat)
+
+## 本次验证 / Validation
+
+- 189 项自动测试通过；打包后的独立程序启动与中英文界面检查通过。
+- 已在本机 Ollama 0.40.13、RTX 5080 上完整下载并校验 IQ2_XS（8422841472 字节），通过本地 CLI 导入及 4096 上下文真实加载。
+- 使用独立临时数据库的虚构记忆与人格验证通过：主聊天和私有快照均正确复述测试代号；短请求复述实验保留原文并得到算术结果。未使用真实用户聊天或启动语音，临时私有快照已删除，压缩基础模型保留供使用。
+- IQ2_S / IQ3_XXS / IQ3_S 仅核对上游文件、GGUF 元数据和自动化兼容路径，未全量下载推理。16K、CPU、其他显卡及与 TTS 同时运行仍需硬件验收；并发语音检查目前是资源预算，不是性能实测。
+- 真实短提示实验仅验证可运行与原文保留，没有证明重复可改善量化质量。
+
+English: 189 automated tests and frozen startup checks passed. Full IQ2_XS download/hash/CLI import/4K inference passed on the local RTX 5080, including synthetic approved-memory, persona and private-snapshot recall. Other quantizations, 16K, CPU and concurrent TTS were not tested with full weights. Repetition is not a demonstrated quality improvement.
+
+---
+
 # ModelDock Chat 0.5.0 · 私有记忆模型实验 / Private memory experiment
 
 本次仅更新独立的 [MDC](https://github.com/reaiksp/ModelDock-Chat)，继续兼容 [MD](https://github.com/reaiksp/ModelDock-Windows) 和既有本地语音路径。

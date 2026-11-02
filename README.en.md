@@ -6,7 +6,17 @@
 
 Development assistance: **OpenAI Codex**. The initial application code and documentation were developed with Codex assistance.
 
-Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.5.0 experimental**.
+Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.6.0 experimental**.
+
+## Same-model compression (0.6.0 experiment)
+
+Under **Voice & deployment → Usage → Compressed large model**, choose among four GSQ-RCO GGUF quantizations of **Qwen3.8-27B**. The parameter class stays 27B; this is not a tiny-model fallback. Available input modes remain 4K / 16K. Recommendations reserve runtime/context memory and local speech resources, and refuse a compressed plan that does not fit.
+
+The text-only installer uses a pinned publisher revision, verifies file length and SHA-256, and imports the GGUF through the Ollama CLI. Cache plus model storage can require two copies during import. It does not run GSQ/RCO training or install the vision projector. Download size is not VRAM usage; numerical quality and speed depend on hardware and quantization.
+
+Connections also offers an optional short-request repetition experiment, off by default. Local requests up to 160 UTF-8 bytes may be repeated once in the outgoing copy if the budget allows. Raw messages/personas/memories remain unchanged; this cannot repair quantization errors or increase the context window.
+
+[Model sources, exact files and verification limits](docs/COMPRESSED_MODELS.md) · [GSQ](https://github.com/IST-DASLab/GSQ) · [RCO](https://github.com/IST-DASLab/RCO)
 
 ## Private memory model experiment (0.5.0)
 
