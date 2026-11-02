@@ -1,3 +1,19 @@
+# 0.7.1 · 模型参数范围 / Parameter range
+
+- 新增0.5B–48B参数上限滑条，0.5B步进，共96个位置；显示实际匹配模型，中间位置均参与推荐。
+- 精度条下载对应参数家族的量化版本，保留对话、语音和磁盘联合预算；拖动不下载、不切换当前模型，保留主动下载按钮。
+- 53个新增固定版本GGUF文件，包含0.5/0.6/1.5/1.7/3/4/7/8/14/32/46.7B档，另保留27B。48B上限当前匹配46.7B Mixtral MoE总参数；不是原生48B。32/46.7B缺少已接入单文件完全体时明确降精度。
+- 用户原文、提示词、记忆、黑话和API设置保留；MD方案包含目标和实际参数，MDC可导入。
+- 新增来源核对及范围回归测试；新增模型未全量下载推理，部署时仍要求实际加载成功。原精度和量化均不承诺记忆准确率。
+
+English: A0.5B–48B parameter cap in0.5B steps selects a real family at or below the cap, then its feasible quantization. Actual parameters and fallback are visible. Dragging never downloads or switches the active model. Newly added files have pinned metadata, size and SHA256 verification; full inference was not performed for them.
+
+[参数范围与完整来源 / Details and sources](docs/PARAMETER_RANGE.md) · [MD](https://github.com/reaiksp/ModelDock-Windows) · [MDC](https://github.com/reaiksp/ModelDock-Chat)
+
+验证：MD193项、MDC354项回归测试通过；参数范围8,640组双端推荐一致。原生界面覆盖96个参数位置，打包程序启动与中英文检查通过。新增模型未全量推理。 / Validation:193 MD and354 MDC tests,8,640 cross-application recommendations, native96-position slider checks and frozen startup passed. New model weights were not fully tested for inference.
+
+---
+
 # ModelDock Chat 0.7.0 · 双需求条与记忆黑话验证
 
 - 同参数精简到 BF16 完全体五档，与对话长度／记忆需求五档共同推荐。

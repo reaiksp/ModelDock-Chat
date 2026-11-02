@@ -1388,7 +1388,7 @@ class Window(QMainWindow):
             valid_compression = type(compression) is int and 1 <= compression <= 5
             valid_demand = type(demand) is int and 1 <= demand <= 5
             voice = plan.get("voice", "off")
-            names = ["capacity", "mode", "variant", "usage", "compression_slider", "conversation_slider"]
+            names = ["capacity", "mode", "variant", "usage", "compression_slider", "conversation_slider", "parameter_slider"]
             widgets = [getattr(self.speech, name) for name in names if hasattr(self.speech, name)]
             blocked = [(widget, widget.blockSignals(True)) for widget in widgets]
             try:
@@ -1398,6 +1398,8 @@ class Window(QMainWindow):
                     usage = "compressed"
                 if usage:
                     self.speech.usage.setCurrentIndex(max(0, self.speech.usage.findData(usage)))
+                from .parameters import saved_parameter
+                self.speech.parameter_slider.setValue(round(saved_parameter(plan.get("parameter_limit", 27)) * 2))
                 if valid_compression and hasattr(self.speech, "compression_slider"):
                     self.speech.compression_slider.setValue(compression)
                 if valid_demand and hasattr(self.speech, "conversation_slider"):

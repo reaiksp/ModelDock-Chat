@@ -345,3 +345,37 @@ def test_import_md_dual_sliders_and_memory_policy_keeps_api_draft(window, tmp_pa
     assert window.store.get("model_demands")[tag] == 3
     assert window.engine.model == "active-provider-model" and window.engine.backend == "api"
     assert window.prompt.toPlainText() == "原始草稿🙂"
+
+
+def test_parameter_slider_covers_intermediate_positions_and_preserves_chat(window):
+    from chatdock.hardware import Hardware
+    window.speech.scanned(Hardware(256,230,240,1000,1000))
+    window.engine.model = 'active-api-model'
+    window.prompt.setPlainText('原文不改🙂')
+    slider = window.speech.parameter_slider
+    assert (slider.minimum(), slider.maximum()) == (1, 96)
+    for step in range(1, 97):
+        slider.setValue(step)
+        assert window.speech.plan['actual_parameters'] <= step / 2
+        assert window.store.get('speech')['parameter_limit'] == step / 2
+        assert window.engine.model == 'active-api-model' and not window.job
+    assert window.prompt.toPlainText() == '原文不改🙂'
+    window.speech.remote_text.setChecked(True)
+    assert not slider.isEnabled() and slider.value() == 96
+
+
+def test_import_md_parameter_limit_and_actual_quantized_model(window, tmp_path, monkeypatch):
+    import json
+    from chatdock.parameters import VARIANTS
+    row = next(r for r in VARIANTS if r['parameters'] == 3 and r['grade'] == 3)
+    tag = row['tag']
+    directory = tmp_path / 'ModelDock'
+    directory.mkdir()
+    (directory / 'settings.json').write_text(json.dumps({'model':tag, 'model_plans':{tag:{'model':tag,'context':8192,'parameter_limit':3.5,'actual_parameters':3,'compression_level':3,'conversation_demand':3,'usage':'压缩大模型'}}}),encoding='utf-8')
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    monkeypatch.setattr(window, 'connect', lambda:None)
+    window.import_md_plan()
+    assert window.speech.parameter_slider.value() == 7
+    assert window.speech.usage.currentData() == 'compressed'
+    assert window.store.get('model') == tag
+    assert window.store.get('model_contexts')[tag] == 8192

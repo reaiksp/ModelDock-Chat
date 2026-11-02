@@ -98,7 +98,7 @@ def test_compressed_ui_is_opt_in_and_shows_source(app, tmp_path):
         assert win.speech.compression_note.isHidden()
         win.speech.usage.setCurrentIndex(win.speech.usage.findData('compressed'))
         assert not win.speech.compression_note.isHidden()
-        assert '27B' in win.speech.compression_note.text()
+        assert 'F16/BF16' in win.speech.compression_note.text()
         assert 'huggingface.co/ISTA-DASLab/' in win.speech.compression_source.text()
         win.speech.scanned(hardware())
         assert win.speech.plan['parameters'] == '27B'

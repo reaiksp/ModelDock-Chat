@@ -1,5 +1,7 @@
 # ModelDock Chat
 
+新增模型参数范围：0.5B–48B、0.5B步进，联动精简版本；显示实际匹配参数。 / New parameter-cap slider:0.5B–48B in0.5B steps, selecting corresponding quantized variants. [说明 / Details](docs/PARAMETER_RANGE.md)
+
 **简体中文** | [English](README.en.md)
 
 **这是 [ModelDock-Windows](https://github.com/reaiksp/ModelDock-Windows) 的独立 SUB 配套项目。** ModelDock Chat 提供本地 / API 图形化聊天、人格提示词、三维用户记忆、黑话学习及独立的本地语音部署。两个项目拥有独立仓库、程序和数据目录，通过 Ollama 本地 API 连接。
@@ -10,7 +12,7 @@
 
 ![聊天主页（演示数据）](docs/images/chat.png)
 
-## 双需求条推荐（0.7.0）
+## 双需求条推荐（0.7.1）
 
 **精简 → 完全体**：同一 27B 模型的 IQ2_XS、IQ3_XXS、Q4_K_M、Q8_0、真实 BF16 文字权重五档。**对话长短与记忆需求**：4K / 4K / 8K / 16K / 32K，并配套调整记忆检索与续聊摘要预算。档位不是质量评分，也不保证某个记忆准确率。
 

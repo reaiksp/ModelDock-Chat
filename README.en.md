@@ -1,14 +1,16 @@
 # ModelDock Chat (MDC)
 
+New parameter-cap slider:0.5B–48B in0.5B steps, selecting corresponding quantized variants. [说明 / Details](docs/PARAMETER_RANGE.md)
+
 [简体中文](README.md) | **English**
 
 **MDC is an independent SUB / companion project of [ModelDock-Windows (MD)](https://github.com/reaiksp/ModelDock-Windows).** MD deploys local models; MDC provides conversations, personalities, user memory and slang knowledge. Both projects have separate repositories, applications and data directories.
 
 Development assistance: **OpenAI Codex**. The initial application code and documentation were developed with Codex assistance.
 
-Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.0 experimental**.
+Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.1 experimental**.
 
-## Two recommendation sliders (0.7.0)
+## Two recommendation sliders (0.7.1)
 
 **Compression → full precision** has five same-27B choices: IQ2_XS, IQ3_XXS, Q4_K_M, Q8_0 and true BF16 text weights. **Conversation length & memory requirement** selects 4K / 4K / 8K / 16K / 32K and corresponding memory-retrieval/summary budgets. Neither slider is a measured quality score or an accuracy guarantee.
 

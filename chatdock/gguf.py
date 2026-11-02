@@ -46,6 +46,11 @@ for filename, size, digest in [
         "sha256": digest, "revision": "a316ea527fde32c12487be7574e2db5ac2ad2a7e", "repo": repo}
 
 
+from .parameters import VARIANTS
+for row in VARIANTS:
+    FILES[row["tag"].casefold()] = {k: row[k] for k in ("tag", "filename", "size", "sha256", "revision", "repo")}
+
+
 def is_supported(tag):
     return isinstance(tag, str) and tag.casefold() in FILES
 

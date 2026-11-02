@@ -14,6 +14,7 @@ from .hardware import (detect, recommend, free_disk, ollama_models_dir, GRADE_LA
                        CONVERSATION_CONTEXTS, CONVERSATION_RESERVES)
 from .gguf import install_gguf, is_supported
 from .i18n import tr
+from .parameters import parameter_size, saved_parameter
 from .network import Client, connect_local, verify_local_model
 from .speech import (SpeechRecords, SpeechService, readout_text, SPEAKERS, LANGUAGES,
                      run_command)
@@ -88,6 +89,18 @@ class SpeechPanel(QWidget):
             self.capacity.addItem(title,value)
         self.capacity.setCurrentIndex(max(0,self.capacity.findData(self.settings.get("capacity","large"))))
         self.capacity.hide()  # Kept for legacy MD-plan imports; sliders are the visible controls.
+        self.parameter_slider = QSlider(Qt.Orientation.Horizontal)
+        self.parameter_slider.setRange(1, 96)
+        self.parameter_slider.setSingleStep(1)
+        self.parameter_slider.setPageStep(2)
+        self.parameter_slider.setValue(round(saved_parameter(self.settings.get("parameter_limit", 27)) * 2))
+        self.parameter_value = QLabel()
+        self.parameter_value.setWordWrap(True)
+        parameter_box = QVBoxLayout()
+        parameter_box.addWidget(self.parameter_slider)
+        parameter_box.addWidget(self.parameter_value)
+        form.addRow("模型参数范围 · 0.5B–48B", parameter_box)
+        self.parameter_slider.valueChanged.connect(self.parameter_changed)
         self.compression_slider = QSlider(Qt.Orientation.Horizontal)
         self.compression_slider.setRange(1, 5)
         self.compression_slider.setSingleStep(1)
@@ -100,7 +113,7 @@ class SpeechPanel(QWidget):
         compression_box = QVBoxLayout()
         compression_box.addWidget(self.compression_slider)
         compression_ends = QHBoxLayout()
-        for text in ["精简省资源", "BF16 完全体"]:
+        for text in ["精简省资源", "F16 / BF16 完全体"]:
             endpoint = QLabel(text)
             endpoint.setObjectName("muted")
             compression_ends.addWidget(endpoint)
@@ -138,7 +151,7 @@ class SpeechPanel(QWidget):
         self.grade_options = QLabel()
         self.grade_options.setWordWrap(True)
         box.addWidget(self.grade_options)
-        self.compression_note = QLabel("同一 27B 模型，1–4 档为不同量化，5 档为 BF16 原精度文字权重，不含视觉投影。文件大小不等于显存；缓存和模型需双份磁盘，语音另留资源。")
+        self.compression_note = QLabel("按参数范围匹配模型；1–4 档为量化，5 档为 F16/BF16 原精度。部分模型没有已核对的单文件完全体，会明确降档。缓存与模型需双份磁盘，语音另留资源。")
         self.compression_note.setWordWrap(True)
         box.addWidget(self.compression_note)
         self.compression_source = QLabel('<a href="https://huggingface.co/ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF">GSQ + RCO 压缩来源 ↗</a> · <a href="https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF">Q4 / Q8 / BF16 来源 ↗</a>')
@@ -309,6 +322,10 @@ class SpeechPanel(QWidget):
             return default
         return value if 1 <= value <= 5 else default
 
+    def parameter_changed(self):
+        self.usage.setCurrentIndex(self.usage.findData("compressed"))
+        self.update_recommendations()
+
     def sliders_changed(self, value=None):
         blocked = self.capacity.blockSignals(True)
         self.capacity.setCurrentIndex(self.capacity.findData("context" if self.conversation_slider.value() >= 4 else "large"))
@@ -325,11 +342,16 @@ class SpeechPanel(QWidget):
     def update_slider_state(self):
         idle = not self._busy and not self.window.job
         local = not self.remote_text.isChecked()
+        self.parameter_slider.setEnabled(idle and local)
         self.compression_slider.setEnabled(idle and local and self.usage.currentData() == "compressed")
         self.conversation_slider.setEnabled(idle and local)
         self.text_deploy.setEnabled(idle and local and self.plan is not None)
 
     def update_slider_labels(self):
+        limit = self.parameter_slider.value() / 2
+        self.parameter_value.setText(tr("参数上限 {0}B · 匹配 {1}B；拖动进入精简推荐，下载须主动点击。").format(f"{limit:g}", f"{parameter_size(limit):g}"))
+        if parameter_size(limit) in {32.0, 46.7}:
+            self.parameter_value.setText(self.parameter_value.text() + "\n" + tr("该参数档无已核对单文件完全体，5档将推荐可用量化版本。"))
         compression = self.compression_slider.value()
         self.compression_value.setText(tr("{0} 档 · {1}").format(compression, tr(GRADE_LABELS[compression])))
         demand = self.conversation_slider.value()
@@ -345,7 +367,7 @@ class SpeechPanel(QWidget):
             self.settings = {}
 
     def snapshot(self):
-        return {**self.settings, "enabled": self.mode.currentData(), "variant": self.variant.currentData(),
+        return {**self.settings, "parameter_limit": self.parameter_slider.value() / 2, "enabled": self.mode.currentData(), "variant": self.variant.currentData(),
             "capacity": "context" if self.conversation_slider.value() >= 4 else "large",
             "compression_level": self.compression_slider.value(), "conversation_demand": self.conversation_slider.value(),
             "usage": self.usage.currentData(), "preference": self.preference.currentData(),
@@ -392,7 +414,7 @@ class SpeechPanel(QWidget):
         same_disk = self.service.root.resolve().anchor.lower() == ollama_models_dir().resolve().anchor.lower()
         return recommend(self.hw, voice, self.variant.currentData(), self.usage.currentData(),
                          self.preference.currentData(), same_disk, self.remote_text.isChecked(), self.capacity.currentData(),
-                         compression_level=self.compression_slider.value(), conversation_demand=self.conversation_slider.value())
+                         compression_level=self.compression_slider.value(), conversation_demand=self.conversation_slider.value(), parameter_limit=self.parameter_slider.value() / 2)
 
     def describe(self, plan):
         if not plan:
@@ -410,6 +432,10 @@ class SpeechPanel(QWidget):
                 description += "\n" + tr(plan["fallback_reason"])
         if plan.get("conversation_demand"):
             description += "\n" + tr("对话需求 {0} 档 · 上下文额外预留 {1} GiB").format(plan["conversation_demand"], plan["context_reserve"])
+        if plan.get("actual_parameters") is not None:
+            description += "\n" + tr("参数上限 {0}B · 实际模型 {1}B").format(plan["parameter_limit"], plan["actual_parameters"])
+        if plan.get("source"):
+            description += "\n" + plan["source"]
         return description
 
     def update_compression_notice(self):
@@ -435,7 +461,7 @@ class SpeechPanel(QWidget):
             for grade in range(1, 6):
                 choice = recommend(self.hw, bool(self.mode.currentData()), self.variant.currentData(), "compressed",
                     self.preference.currentData(), same_disk, False, self.capacity.currentData(),
-                    compression_level=grade, conversation_demand=self.conversation_slider.value())
+                    compression_level=grade, conversation_demand=self.conversation_slider.value(), parameter_limit=self.parameter_slider.value() / 2)
                 if choice is None:
                     state = tr("不足")
                 elif choice["effective_compression_level"] < grade:

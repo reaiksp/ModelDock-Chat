@@ -644,5 +644,16 @@
   "{0} 档：{1}": "Grade {0}: {1}",
   "需降至 {0} 档": "Requires grade {0}",
   "把已确认记忆、黑话、用户资料、可选人格和续聊摘要保存为本机模型的默认提示。属于配置快照，仍占上下文，不是权重训练。": "Save approved memories, slang, user profile, optional persona and continuation summaries as the local model's default prompt. This is a configuration snapshot that still uses context, not weight training.",
-  "已纳入 {0} 条已确认黑话；预算省略 {1} 条。": "Included {0} approved slang entries; omitted {1} to fit the budget."
+  "已纳入 {0} 条已确认黑话；预算省略 {1} 条。": "Included {0} approved slang entries; omitted {1} to fit the budget.",
+  "模型参数范围 · 0.5B–48B": "Model parameter range · 0.5B–48B",
+  "参数上限 {0}B · 匹配 {1}B；拖动进入精简推荐，下载须主动点击。": "Parameter cap {0}B · matched {1}B. Drag to recommend quantized models; click to download.",
+  "参数上限 {0}B · 实际模型 {1}B": "Parameter cap {0}B · actual model {1}B",
+  "每格 0.5B；实际模型取范围内最近的已核对参数档，不会凭空生成模型。": "0.5B steps; matches the closest verified parameter size within the cap.",
+  "按参数范围匹配模型；1–4 档为量化，5 档为 F16/BF16 原精度。部分模型没有已核对的单文件完全体，会明确降档。缓存与模型需双份磁盘，语音另留资源。": "Models match the parameter cap. Grades 1–4 are quantized; grade 5 is F16/BF16. Missing verified single-file full precision is shown as a fallback. Allow disk for both cache and model, plus speech resources.",
+  "极致精简 · 约2 bit": "Lean · about2 bit",
+  "轻量优先 · 约3 bit": "Light · about3 bit",
+  "完全体 · F16 / BF16": "Full precision · F16 / BF16",
+  "按参数范围选择对应模型的量化版本；实际质量与资源需求须验收。": "Select a quantized variant for the parameter cap; actual quality and resource use need validation.",
+  "F16 / BF16 完全体": "F16 / BF16 full precision",
+  "该参数档无已核对单文件完全体，5档将推荐可用量化版本。": "No verified single-file full-precision variant is available at this size; grade5 recommends an available quantization."
 }

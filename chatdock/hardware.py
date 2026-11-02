@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
+from .parameters import VARIANTS, parameter_size, download_gib, runtime_gib
 
 FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 VOICE_MODELS = {
@@ -50,8 +51,8 @@ for quant, size_bytes, memory, digest in [
 
 # The five slider positions keep the same base model and end at BF16 text weights.
 # Legacy ungraded calls retain the original four GSQ/RCO choices above.
-GRADE_LABELS = {1: "极致精简 · IQ2_XS", 2: "轻量优先 · IQ3_XXS", 3: "均衡 · Q4_K_M",
-                4: "高精度 · Q8_0", 5: "完全体 · BF16"}
+GRADE_LABELS = {1: "极致精简 · 约2 bit", 2: "轻量优先 · 约3 bit", 3: "均衡 · Q4_K_M",
+                4: "高精度 · Q8_0", 5: "完全体 · F16 / BF16"}
 CONVERSATION_CONTEXTS = {1: 4096, 2: 4096, 3: 8192, 4: 16384, 5: 32768}
 CONVERSATION_RESERVES = {1: 0.0, 2: 0.0, 3: 1.5, 4: 4.0, 5: 8.0}
 for data in TEXT_METADATA.values():
@@ -74,6 +75,15 @@ for grade, quant, size_bytes, memory, digest in [
         "compression_grade": grade, "source": "https://huggingface.co/" + repo,
         "source_revision": "a316ea527fde32c12487be7574e2db5ac2ad2a7e",
         "filename": filename, "size_bytes": size_bytes, "sha256": digest}
+
+
+PARAMETER_TEXT_MODELS = {27.0: GRADE_TEXT_MODELS}
+for row in VARIANTS:
+    PARAMETER_TEXT_MODELS.setdefault(row['parameters'], {})[row['grade']] = (row['tag'], download_gib(row), runtime_gib(row))
+    TEXT_METADATA[row['tag']] = {"method": "GGUF", "base_model": row['family'], "parameters": str(row['parameters']) + 'B',
+        "parameter_size": row['parameters'], "compression_grade": row['grade'], "quantization": row['quant'],
+        "source": "https://huggingface.co/" + row['repo'], "source_revision": row['revision'],
+        "filename": row['filename'], "size_bytes": row['size'], "sha256": row['sha256']}
 
 
 def _level(value, field):
@@ -131,12 +141,14 @@ def detect(data_path):
 
 
 def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced", same_disk=True,
-              remote_text=False, capacity="large", compression_level=None, conversation_demand=None):
+              remote_text=False, capacity="large", compression_level=None, conversation_demand=None, parameter_limit=None):
     """Joint budgets; sliders never change providers or reduce requested context."""
     if compression_level is not None:
         _level(compression_level, "压缩档位")
     if conversation_demand is not None:
         _level(conversation_demand, "对话需求")
+    selected_parameters = parameter_size(parameter_limit) if parameter_limit is not None else 27.0
+    grade_models = PARAMETER_TEXT_MODELS[selected_parameters]
     graded = compression_level is not None and usage == "compressed" and not remote_text
     ram = max(0, min(hw.ram - max(3, hw.ram * .2), hw.available - 1))
     gpu = max(0, hw.vram - max(1, hw.vram * .12))
@@ -146,10 +158,12 @@ def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced",
                else (16384 if capacity == "context" else 4096))
     extra = (CONVERSATION_RESERVES[conversation_demand] if conversation_demand is not None
              else (4.0 if context > 4096 else 0.0)) if not remote_text else 0.0
+    if graded and selected_parameters != 27:
+        extra *= 2  # Conservative context reserve for newly catalogued transformer families.
     if remote_text and conversation_demand is not None:
         context = None  # This plan covers local speech, never the provider's context setting.
     choices = ([("API", 0, 0)] if remote_text else
-               [GRADE_TEXT_MODELS[level] for level in range(1, compression_level + 1)] if graded else
+               [grade_models[level] for level in range(1, compression_level + 1) if level in grade_models] if graded else
                TEXT_MODELS.get(usage, TEXT_MODELS["chat"]))
     plans = []
     for variant in sizes:
@@ -176,7 +190,8 @@ def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced",
                     "download": download, **metadata,
                     "compression_level": compression_level if graded else None,
                     "effective_compression_level": effective, "fallback_reason": fallback,
-                    "conversation_demand": conversation_demand if not remote_text else None})
+                    "conversation_demand": conversation_demand if not remote_text else None,
+                    "parameter_limit": parameter_limit, "actual_parameters": selected_parameters if graded else None})
     if not plans:
         return None
     if graded:
