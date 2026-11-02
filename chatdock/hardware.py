@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
+from .storage import text_models_dir, speech_models_dir
 from .context_levels import CONVERSATION_CONTEXTS, context_reserve
 from .parameters import VARIANTS, parameter_size, download_gib, runtime_gib
 
@@ -101,6 +102,10 @@ class Hardware:
     disk: float
     model_disk: float
     gpu: str = "CPU"
+    voice_disk: float | None = None
+    runtime_path: str = ""
+    voice_path: str = ""
+    text_path: str = ""
 
 
 def free_disk(path):
@@ -111,15 +116,7 @@ def free_disk(path):
 
 
 def ollama_models_dir():
-    value = os.getenv("OLLAMA_MODELS")
-    if not value and os.name == "nt":
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-                value = winreg.QueryValueEx(key, "OLLAMA_MODELS")[0]
-        except OSError:
-            pass
-    return Path(os.path.expandvars(value)) if value else Path.home() / ".ollama/models"
+    return text_models_dir()
 
 
 def detect(data_path):
@@ -138,7 +135,9 @@ def detect(data_path):
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
     return Hardware(mem.total / 1024**3, mem.available / 1024**3, vram,
-                    free_disk(data_path), free_disk(ollama_models_dir()), gpu)
+                    free_disk(data_path), free_disk(ollama_models_dir()), gpu,
+                    free_disk(speech_models_dir(data_path)), str(Path(data_path).resolve()),
+                    str(speech_models_dir(data_path).resolve()), str(ollama_models_dir().resolve()))
 
 
 def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced", same_disk=True,
@@ -166,19 +165,25 @@ def recommend(hw, voice=False, size="auto", usage="chat", preference="balanced",
     choices = ([("API", 0, 0)] if remote_text else
                [grade_models[level] for level in range(1, compression_level + 1) if level in grade_models] if graded else
                TEXT_MODELS.get(usage, TEXT_MODELS["chat"]))
+    placed = bool(hw.runtime_path and hw.voice_path and hw.text_path)
+    same_runtime_voice = Path(hw.runtime_path).anchor.casefold() == Path(hw.voice_path).anchor.casefold() if placed else True
+    same_text_voice = Path(hw.text_path).anchor.casefold() == Path(hw.voice_path).anchor.casefold() if placed else same_disk
+    same_text_runtime = Path(hw.text_path).anchor.casefold() == Path(hw.runtime_path).anchor.casefold() if placed else same_disk
+    voice_disk = hw.voice_disk if hw.voice_disk is not None else hw.disk
     plans = []
     for variant in sizes:
         reserve = VOICE_MODELS[variant] if variant else {"gpu": 0, "ram": 0, "disk": 0}
         if variant and (gpu < reserve["gpu"] + (0 if remote_text else 1.6)
                         or ram < reserve["ram"] + (0 if remote_text else 2)
-                        or hw.disk < reserve["disk"] + 12):
+                        or hw.disk < 12 + (reserve["disk"] if same_runtime_voice else 0)
+                        or voice_disk < reserve["disk"] + (12 if same_runtime_voice else 0)):
             continue
         use_gpu = gpu >= 1.6 and ram >= 2
         budget = (gpu - reserve["gpu"]) if use_gpu else ram
         if not use_gpu and preference != "quality":
             budget = min(budget, (3.2 if preference == "speed" else 5) + extra)
         for tag, download, memory in choices:
-            required = download * (2.15 if tag in TEXT_METADATA else 1.15) + 1 + ((reserve["disk"] + 12) if variant and same_disk else 0)
+            required = download * (2.15 if tag in TEXT_METADATA else 1.15) + 1 + ((reserve["disk"] if same_text_voice else 0) + (12 if same_text_runtime else 0) if variant else 0)
             if memory + extra <= budget and (remote_text or hw.model_disk >= required):
                 metadata = TEXT_METADATA.get(tag, {})
                 effective = metadata.get("compression_grade", 0) if graded else 0

@@ -401,3 +401,25 @@ def test_import_new_2k_step_plan_and_metadata_preserve_exact_context(window,tmp_
     assert window.engine.context==context
     assert window.context_combo.currentData()==context
     assert window.prompt.toPlainText()=='保留我的草稿🙂'
+
+
+def test_storage_controls_route_to_shared_backend_and_keep_api_draft(window,tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from chatdock import storage
+    window.engine.backend='api';window.engine.model='keep-provider-model'
+    window.prompt.setPlainText('保留草稿和提示词🙂')
+    panel=window.speech;target=str(tmp_path/'new-disk')
+    panel.text_storage.setText(target)
+    called=[]
+    monkeypatch.setattr(storage,'apply_text_directory',lambda value,*args:called.append(value) or {'target':value})
+    callbacks=[]
+    monkeypatch.setattr(window,'run_job',lambda fn,done,kind:callbacks.append((fn,done,kind)))
+    panel.apply_storage('text')
+    fn,done,kind=callbacks[0]
+    assert kind=='model_storage'
+    done(fn(SimpleNamespace(task=object(),event=SimpleNamespace(emit=lambda *args:None))))
+    assert called==[target] and window.after_job==panel.scan
+    assert window.engine.model=='keep-provider-model' and window.engine.backend=='api'
+    assert window.prompt.toPlainText()=='保留草稿和提示词🙂'
+    window.i18n.set_language('en')
+    assert 'model folder' in panel.info.text().lower()

@@ -9,6 +9,8 @@ import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .storage import text_models_dir, check_server_directory
+
 LOCAL_URL = "http://127.0.0.1:11434"
 FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -296,13 +298,7 @@ def connect_local(task, log, data_path):
             raise RuntimeError("未找到 Ollama。请安装 Ollama，再在 MDC 的语音与部署页面下载模型，或复用 ModelDock。")
         env = os.environ.copy()
         env["OLLAMA_HOST"] = "127.0.0.1:11434"
-        if not env.get("OLLAMA_MODELS") and os.name == "nt":
-            try:
-                import winreg
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-                    env["OLLAMA_MODELS"] = str(winreg.QueryValueEx(key, "OLLAMA_MODELS")[0])
-            except OSError:
-                pass
+        env["OLLAMA_MODELS"] = str(text_models_dir())
         log("正在启动本机 Ollama CLI…")
         with (Path(data_path) / "ollama-server.log").open("ab") as stream:
             subprocess.Popen([cli, "serve"], env=env, stdin=subprocess.DEVNULL,
@@ -316,6 +312,7 @@ def connect_local(task, log, data_path):
                 task.event.wait(.5)
         else:
             raise RuntimeError("本机服务未就绪，请检查 Ollama 后重试。")
+    check_server_directory()
     models = client.request("/api/tags", task=task, timeout=10).get("models", [])
     models = [m for m in models if not m.get("remote_host") and not m.get("remote_model") and ":cloud" not in m.get("name", "")]
     parent = Path(os.getenv("LOCALAPPDATA", str(Path.home() / ".local/share"))) / "ModelDock/settings.json"

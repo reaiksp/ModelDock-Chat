@@ -7,8 +7,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 & $Python tools\prepare_release.py
 if ($LASTEXITCODE -ne 0) { throw 'Preparing release failed.' }
-$zipPath = Join-Path $PSScriptRoot 'dist\ModelDockChat-0.7.2-windows-x64.zip'
+$zipPath = Join-Path $PSScriptRoot 'dist\ModelDockChat-0.7.3-windows-x64.zip'
 Compress-Archive -LiteralPath (Join-Path $PSScriptRoot 'dist\ModelDockChat') -DestinationPath $zipPath -Force
 $digest = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-"$digest  ModelDockChat-0.7.2-windows-x64.zip" | Set-Content -LiteralPath "$zipPath.sha256" -Encoding ascii
+"$digest  ModelDockChat-0.7.3-windows-x64.zip" | Set-Content -LiteralPath "$zipPath.sha256" -Encoding ascii
 Write-Host "Release ready: $zipPath"

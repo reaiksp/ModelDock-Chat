@@ -8,10 +8,11 @@ REPOS = {size: "Qwen/Qwen3-TTS-12Hz-" + size + "-CustomVoice" for size in ["0.6B
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
+    parser.add_argument("--model-dir", default="")
     parser.add_argument("--size", choices=list(REPOS), required=True)
     parser.add_argument("--source", choices=["huggingface", "modelscope"], required=True)
     args = parser.parse_args()
-    target = Path(args.root) / "models" / args.size
+    target = (Path(args.model_dir) if args.model_dir else Path(args.root) / "models") / args.size
     target.mkdir(parents=True, exist_ok=True)
     marker = target / "model.complete"
     marker.unlink(missing_ok=True)

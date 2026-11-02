@@ -14,6 +14,7 @@ from .hardware import (detect, recommend, free_disk, ollama_models_dir, GRADE_LA
                        CONVERSATION_CONTEXTS, CONVERSATION_RESERVES)
 from .gguf import install_gguf, is_supported
 from .i18n import tr
+from . import storage
 from .parameters import parameter_size, saved_parameter
 from .context_levels import saved_conversation
 from .network import Client, connect_local, verify_local_model
@@ -161,6 +162,22 @@ class SpeechPanel(QWidget):
         self.hardware = QLabel("点击检测，比较开语音与不开语音两套方案。")
         self.hardware.setWordWrap(True)
         box.addWidget(self.hardware)
+        location_form = QFormLayout()
+        self.text_storage = QLineEdit(str(ollama_models_dir()))
+        self.voice_storage = QLineEdit(str(self.service.models_dir))
+        self.storage_buttons = []
+        for title, edit, kind in [("文字模型目录（MD/MDC共用）", self.text_storage, "text"),
+                                   ("语音模型文件目录", self.voice_storage, "speech")]:
+            row = QHBoxLayout()
+            row.addWidget(edit, 1)
+            self.storage_buttons.append(self.button("选择目录", lambda checked=False, k=kind: self.choose_storage(k), row))
+            caption = "应用目录并重启服务" if kind == "text" else "应用语音模型目录"
+            self.storage_buttons.append(self.button(caption, lambda checked=False, k=kind: self.apply_storage(k), row))
+            location_form.addRow(title, row)
+        box.addLayout(location_form)
+        note = QLabel("先复制并校验已有模型；旧文件保留。文字目录应用会重启本地Ollama；语音需先停止服务。聊天、人格与语音运行环境不移动。")
+        note.setWordWrap(True)
+        box.addWidget(note)
         self.without = QLabel()
         self.with_voice = QLabel()
         for widget in [self.without, self.with_voice]:
@@ -394,9 +411,38 @@ class SpeechPanel(QWidget):
         self._busy = value
         for widget in [self.scan_button, self.text_deploy, self.install_button, self.start_button,
                        self.stop_service_button, self.read_button, self.selection_button,
-                       self.mode, self.variant, self.usage, self.preference, self.source, self.history, self.remote_text, self.capacity]:
+                       self.text_storage, self.voice_storage, *self.storage_buttons, self.mode, self.variant, self.usage, self.preference, self.source, self.history, self.remote_text, self.capacity]:
             widget.setEnabled(not value)
         self.update_slider_state()
+
+    def choose_storage(self, kind):
+        edit = self.text_storage if kind == "text" else self.voice_storage
+        path = QFileDialog.getExistingDirectory(self, tr("选择模型存储目录"), edit.text())
+        if path:
+            edit.setText(path)
+
+    def apply_storage(self, kind):
+        if self.window.job:
+            return
+        if kind == "text":
+            selected = self.text_storage.text().strip()
+            work = lambda job: storage.apply_text_directory(selected, job.task, lambda text: job.event.emit("speech_status", text))
+        else:
+            try:
+                self.service.health()
+            except (OSError, ValueError, RuntimeError):
+                pass
+            else:
+                self.window.error("请先停止语音服务，再更换语音模型目录。")
+                return
+            selected, previous = self.voice_storage.text().strip(), self.service.models_dir
+            work = lambda job: storage.apply_speech_directory(selected, previous, job.task, lambda text: job.event.emit("speech_status", text))
+        def done(result):
+            self.text_storage.setText(str(ollama_models_dir()))
+            self.voice_storage.setText(str(self.service.models_dir))
+            self.info.setText(tr("模型目录已生效，旧模型副本保留；后续下载与缓存使用新目录。"))
+            self.window.after_job = self.scan
+        self.window.run_job(work, done, "model_storage")
 
     def scan(self):
         self.window.run_job(lambda j: detect(self.service.root), self.scanned, "hardware")
@@ -411,7 +457,7 @@ class SpeechPanel(QWidget):
     def get_plan(self, voice):
         if not self.hw:
             return None
-        same_disk = self.service.root.resolve().anchor.lower() == ollama_models_dir().resolve().anchor.lower()
+        same_disk = self.service.models_dir.resolve().anchor.lower() == ollama_models_dir().resolve().anchor.lower()
         return recommend(self.hw, voice, self.variant.currentData(), self.usage.currentData(),
                          self.preference.currentData(), same_disk, self.remote_text.isChecked(), self.capacity.currentData(),
                          compression_level=self.compression_slider.value(), conversation_demand=self.conversation_slider.value(), parameter_limit=self.parameter_slider.value() / 2)
@@ -456,7 +502,7 @@ class SpeechPanel(QWidget):
         self.with_voice.setText(tr("开语音方案：") + self.describe(self.get_plan(True)))
         self.plan = self.get_plan(bool(self.mode.currentData()))
         if self.usage.currentData() == "compressed" and not self.remote_text.isChecked():
-            same_disk = self.service.root.resolve().anchor.lower() == ollama_models_dir().resolve().anchor.lower()
+            same_disk = self.service.models_dir.resolve().anchor.lower() == ollama_models_dir().resolve().anchor.lower()
             states = []
             for grade in range(1, 6):
                 choice = recommend(self.hw, bool(self.mode.currentData()), self.variant.currentData(), "compressed",
@@ -542,6 +588,7 @@ class SpeechPanel(QWidget):
             # Download command uses a catalog tag, never arbitrary user shell input.
             env = os.environ.copy()
             env["OLLAMA_HOST"] = "127.0.0.1:11434"
+            env["OLLAMA_MODELS"] = str(ollama_models_dir())
             if is_supported(plan["text"]):
                 installed_tag = install_gguf(plan["text"], cli, ollama_models_dir() / ".modeldock-gguf",
                     job.task, lambda text:job.event.emit("speech_status", text))

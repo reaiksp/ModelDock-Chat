@@ -1,5 +1,7 @@
 # ModelDock Chat
 
+模型目录可在界面选择、校验迁移并应用；文字与语音权重可分别选盘。 / Select model storage in the app, verify and migrate files, then apply the directory. Text and speech weights can use separate disks. [说明 / Details](docs/MODEL_STORAGE.md)
+
 上下文五档：2K / 4K / 6K / 8K / 10K；已部署方案保持原上下文。 / Context levels:2K /4K /6K /8K /10K. Existing deployed plans retain their context.
 
 新增模型参数范围：0.5B–48B、0.5B步进，联动精简版本；显示实际匹配参数。 / New parameter-cap slider:0.5B–48B in0.5B steps, selecting corresponding quantized variants. [说明 / Details](docs/PARAMETER_RANGE.md)
@@ -14,7 +16,7 @@
 
 ![聊天主页（演示数据）](docs/images/chat.png)
 
-## 双需求条推荐（0.7.2）
+## 双需求条推荐（0.7.3）
 
 **精简 → 完全体**：同一 27B 模型的 IQ2_XS、IQ3_XXS、Q4_K_M、Q8_0、真实 BF16 文字权重五档。**对话长短与记忆需求**：2K / 4K / 6K / 8K / 10K，并配套调整记忆检索与续聊摘要预算。档位不是质量评分，也不保证某个记忆准确率。
 

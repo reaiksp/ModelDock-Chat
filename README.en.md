@@ -1,5 +1,7 @@
 # ModelDock Chat (MDC)
 
+Select model storage in the app, verify and migrate files, then apply the directory. Text and speech weights can use separate disks. [说明 / Details](docs/MODEL_STORAGE.md)
+
 上下文五档：2K / 4K / 6K / 8K / 10K；已部署方案保持原上下文。 / Context levels:2K /4K /6K /8K /10K. Existing deployed plans retain their context.
 
 New parameter-cap slider:0.5B–48B in0.5B steps, selecting corresponding quantized variants. [说明 / Details](docs/PARAMETER_RANGE.md)
@@ -10,9 +12,9 @@ New parameter-cap slider:0.5B–48B in0.5B steps, selecting corresponding quanti
 
 Development assistance: **OpenAI Codex**. The initial application code and documentation were developed with Codex assistance.
 
-Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.2 experimental**.
+Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.3 experimental**.
 
-## Two recommendation sliders (0.7.2)
+## Two recommendation sliders (0.7.3)
 
 **Compression → full precision** has five same-27B choices: IQ2_XS, IQ3_XXS, Q4_K_M, Q8_0 and true BF16 text weights. **Conversation length & memory requirement** selects 2K / 4K / 6K / 8K / 10K and corresponding memory-retrieval/summary budgets. Neither slider is a measured quality score or an accuracy guarantee.
 

@@ -17,6 +17,7 @@ import wave
 from pathlib import Path
 
 from .hardware import VOICE_MODELS
+from .storage import speech_models_dir
 from .network import Cancelled, Client, FLAGS, Task
 
 SPEAKERS = ["Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric", "Ryan", "Aiden", "Ono_Anna", "Sohee"]
@@ -151,6 +152,10 @@ class SpeechService:
         self.owned = False
 
     @property
+    def models_dir(self):
+        return speech_models_dir(self.root)
+
+    @property
     def python(self):
         return self.root / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
@@ -197,7 +202,7 @@ class SpeechService:
         run_command([self.python, "-m", "pip", "install", "qwen-tts==0.1.1", "modelscope==1.34.0"], task, log)
         log("正在下载 Qwen3-TTS 模型，可取消并在下次重试…")
         script = Path(__file__).with_name("tts_download.py")
-        run_command([self.python, script, "--root", self.root, "--size", size, "--source", source], task, log)
+        run_command([self.python, script, "--root", self.root, "--model-dir", self.models_dir, "--size", size, "--source", source], task, log)
         return size
 
     def start(self, size, task, log):
@@ -211,7 +216,7 @@ class SpeechService:
             if health.get("repo") == VOICE_MODELS[size]["repo"]:
                 return health
             raise ValueError("请先停止当前语音服务，再更换模型。")
-        model_path = self.root / "models" / size
+        model_path = self.models_dir / size
         if not self.python.is_file() or not (model_path / "model.complete").is_file():
             raise ValueError("请先下载并安装选定的语音模型。")
         # The server gets a local model path and cannot download during inference.

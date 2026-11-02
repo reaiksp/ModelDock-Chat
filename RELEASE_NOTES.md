@@ -1,3 +1,21 @@
+# 0.7.3 · 模型换盘与真实目录校验 / Model storage selection
+
+- MD/MDC新增文字模型目录选择与应用；MDC新增独立语音模型文件目录，下载缓存跟随所选目录。
+- 复制并逐文件校验后重启Ollama，核对实际目录与模型列表；修复只改CLI环境变量、运行中服务仍写C盘的问题。
+- 不覆盖不同的同名文件，不自动删除原模型；取消／失败保留源文件，服务切换失败尝试恢复原服务。
+- 共享文字目录配置，保留聊天、人格、记忆、黑话、API提供商与密钥；语音运行环境不移动。
+- 分别核算模型与语音运行环境所在磁盘的空间。
+
+验证：MD211项、MDC379项回归通过，含迁移校验、冲突、取消、服务回滚、分盘预算与API草稿保留。此功能不改变模型权重。
+
+本机额外验证：34个模型文件迁移并逐一核对SHA-256，3个原有模型从E盘列出，C盘旧模型目录清理后Qwen3.5-9B以2K上下文空提示加载成功并卸载。实际释放约33.6GiB；聊天数据库、设置和身份密钥校验未变。打包后中英文界面、换盘控件与启动检查通过。
+
+English: Adds graphical storage selection, verified migration and local-server restart, fixing stale server directories. Text and speech models may use separate disks. Original files and user data are retained by default.211 MD and379 MDC regression tests passed.
+
+[使用说明 / Guide](docs/MODEL_STORAGE.md) · [MD](https://github.com/reaiksp/ModelDock-Windows) · [MDC](https://github.com/reaiksp/ModelDock-Chat)
+
+---
+
 # 0.7.2 · 2K一档上下文 / Context in2K increments
 
 - 上下文五档统一为2K /4K /6K /8K /10K，默认保持4K。

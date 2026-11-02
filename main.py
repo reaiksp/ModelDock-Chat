@@ -62,6 +62,7 @@ def main():
                 "private_memory_controls": "Preview" in window.personal_preview.text(),
                 "private_memory_default_off": not window.personal_auto.isChecked(),
                 "input_limit": window.engine.budget.input_limit,
+                "storage_controls": "Apply" in window.speech.storage_buttons[1].text() and "Apply" in window.speech.storage_buttons[3].text(),
                 "context_levels": list(CONVERSATION_CONTEXTS.values()),
                 "compression_steps": [window.speech.compression_slider.minimum(), window.speech.compression_slider.maximum()],
                 "conversation_steps": [window.speech.conversation_slider.minimum(), window.speech.conversation_slider.maximum()],
