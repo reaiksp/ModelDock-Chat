@@ -1,3 +1,28 @@
+# ModelDock Chat 0.5.0 · 私有记忆模型实验 / Private memory experiment
+
+本次仅更新独立的 [MDC](https://github.com/reaiksp/ModelDock-Chat)，继续兼容 [MD](https://github.com/reaiksp/ModelDock-Windows) 和既有本地语音路径。
+
+- 有历史时在可用输入预算达到 90% 且有摘要空间的发送前自动概括、保存摘要检查点并建立关联续聊。原始消息与草稿保留，摘要不自动升级为已确认用户事实。
+- “记忆与用户”新增私有模型快照：预览用户资料、已确认记忆、可选人格及当前续聊摘要，在预算内整条选取并显示遗漏数量。
+- 仅在本机 Ollama 以新名称创建、校验默认系统提示；保留原模型及前一快照，创建失败不发布新版本。可删除 MDC 管理的快照。
+- 可选择自动更新：续聊后，以及记忆、资料或人格变化后的下次本地发送时同步。API 聊天保留原提供商与应用内记忆，不创建云端模型。
+- MDC 每轮仍使用数据库中的实时人格、记忆与摘要；快照默认提示供其他 Ollama 客户端使用，其他客户端自带系统提示时可能覆盖默认值。
+- 个人快照不混入黑话词库导出。删除记忆记录不会清除旧聊天、摘要及旧模型中的副本，需要另行处理。
+
+**实验边界：持久系统提示配置，不是修改权重、训练或微调；不突破模型上下文，也不保证模型完全遵循或准确回忆所有内容。** 本版不执行真实权重训练，不上传个人快照。详情见 [中英实验说明](docs/PERSONAL_MEMORY.md)。
+
+English: Local private model snapshots persist approved memories, profile data, an optional persona and a continuation summary as an Ollama default system prompt. Automatic continuation checkpoints preserve original history. Optional refresh follows changes without changing API providers. This is not weight training; context limits and stale-copy deletion still apply.
+
+## 本次验证 / Validation
+
+- 131 项自动测试通过，覆盖既有聊天 / API / 语音兼容、自动概括与检查点、原文保留、候选隔离、预算整条取舍、外部删除重建、失败 / 取消清理及中英文界面。
+- Ollama 0.40.13 / qwen3.5-9b:latest / 4096 上下文真实联调通过：默认 SYSTEM 记忆暗号复述、短人格、摘要 → 检查点 → 新快照，均使用独立临时合成数据。两个测试快照均已删除，基础模型 digest 未变。
+- 打包后的 Windows 独立程序启动检查通过：六个页面、中英文、语音后端加载、记忆实验入口和默认关闭状态正常。
+- 无真实权重训练，无新权重下载，无个人资料上传。模型效果验证仅覆盖这组简短合成资料，不代表任意长事实回忆准确率。
+- 仍需分别验收干净 Windows、第三方 API 账户及不同本地模型；不把配置保存成功视为模型记忆效果保证。
+
+---
+
 # 0.4.0 容量模式与语音兼容更新
 
 - 大上下文 / 大体量两种资源推荐。

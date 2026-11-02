@@ -58,6 +58,8 @@ def main():
                 "pages": window.stack.count(), "speech_bridge_bundled": Path(__file__).parent.joinpath("chatdock/tts_server.py").exists(),
                 "audio_backend_loaded": window.speech.player.mediaStatus() in {QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia},
                 "english_ui": "Chat" in window.nav[0].text(), "independent_database": True,
+                "private_memory_controls": "Preview" in window.personal_preview.text(),
+                "private_memory_default_off": not window.personal_auto.isChecked(),
                 "input_limit": window.engine.budget.input_limit}, indent=2), "utf-8")
             window.close()
             app.quit()

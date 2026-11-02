@@ -252,3 +252,71 @@ def test_md_import_stops_owned_speech_before_connecting(window,tmp_path,monkeypa
     window.after_job()
     assert calls==["stop","connect"]
     window.speech.service.owned=False
+
+def test_personal_model_controls_follow_api_backend(window):
+    ident = add_api(window)
+    window.chat_source.setCurrentIndex(window.chat_source.findData(ident))
+    assert not window.personal_save.isEnabled()
+    assert not window.personal_preview.isEnabled()
+    assert not window.personal_delete.isEnabled()
+    assert window.engine.backend == 'api'
+
+
+def test_personal_model_language_toggle_preserves_draft_and_options(window):
+    raw = '原始输入和人格必须保持🙂'
+    window.prompt.setPlainText(raw)
+    window.personal_persona.setChecked(False)
+    window.personal_auto.setChecked(True)
+    window.i18n.set_language('en')
+    assert window.personal_preview.text() == 'Preview snapshot contents'
+    assert 'automatic' in window.personal_auto.text().lower()
+    assert 'No private' in window.personal_info.text()
+    assert window.prompt.toPlainText() == raw
+    assert window.store.get('personal_model_persona') is False
+    window.i18n.set_language('zh_CN')
+    assert '尚未' in window.personal_info.text()
+    assert window.prompt.toPlainText() == raw
+
+
+def test_preview_translates_counts_without_rewriting_personal_text(window, monkeypatch):
+    window.engine.model = 'test'
+    window.store.set('user_profile', '我希望保留这段中文原文。')
+    window.i18n.set_language('en')
+    shown = []
+    monkeypatch.setattr(window, 'show_memory_text', lambda title, text: shown.append(text))
+    window.preview_personal_model()
+    assert shown and 'Included' in shown[0] and 'Budget' in shown[0]
+    assert '我希望保留这段中文原文。' in shown[0]
+
+
+def test_save_enables_auto_refresh_only_after_success(window, monkeypatch):
+    window.connected = True
+    window.engine.model = 'test'
+    window.prompt.setPlainText('保留草稿')
+    monkeypatch.setattr(window.engine, 'sync_personal_model', lambda *a, **kw: {'name': 'mdc-private-test'})
+    class Job:
+        task = object()
+        class event:
+            @staticmethod
+            def emit(*a):
+                pass
+    def run(fn, done, kind):
+        assert kind == 'personal_model'
+        assert window.store.get('personal_model_auto', False) is False
+        done(fn(Job()))
+    monkeypatch.setattr(window, 'run_job', run)
+    window.save_personal_model()
+    assert window.store.get('personal_model_auto') is True
+    assert window.prompt.toPlainText() == '保留草稿'
+
+
+def test_unverified_private_versions_are_marked_and_not_reported_as_ready(window):
+    from chatdock.personal_model import build_snapshot
+    snapshot = build_snapshot(window.store, 1, 4096)
+    window.store.save_personal_model('mdc-private-bad', 'test', 1, window.session_id, 4096, snapshot, verified=False)
+    window.refresh_personal_models()
+    assert window.personal_picker.currentText().endswith('!')
+    assert '尚无通过校验' in window.personal_info.text()
+    window.i18n.set_language('en')
+    assert 'No verified' in window.personal_info.text()
+    assert 'unverified' in window.personal_info.text()

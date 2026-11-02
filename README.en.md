@@ -6,7 +6,19 @@
 
 Development assistance: **OpenAI Codex**. The initial application code and documentation were developed with Codex assistance.
 
-Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.2.0**.
+Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.5.0 experimental**.
+
+## Private memory model experiment (0.5.0)
+
+In **Memory & user**, preview and create a local **private model snapshot** containing the user profile, approved long-term memories, an optional personality prompt and the current continuation summary. Ollama stores this as the new model's default system prompt. Each update uses a new name and keeps the base model and previous snapshot. Complete memories are selected within the current context budget; the number omitted is shown. Saved prompt content is checked after creation; a failed update does not become the active snapshot.
+
+When history exists, a send that reaches **90% of the available input budget** triggers a summary and a linked continuation. Original messages remain available, and a queryable checkpoint records the summary. Summaries remain potentially incomplete reference data, never automatically approved user facts. Optional automatic snapshot updates run for local chat after continuation, and on the next send after memory, profile or personality changes.
+
+This is **persistent system-prompt configuration, not weight training or fine-tuning**. Stored content still consumes context. Snapshots are created only in local Ollama and are not uploaded to a provider. API chat continues to use in-app memory and summaries; it does not create provider models or switch the selected backend. Raw user input, personality text and preferences are preserved.
+
+Snapshots may contain personal data readable by other local Ollama clients. Do not share a personal snapshot publicly. Deleting a database memory does not erase copies in older snapshots: update or delete those snapshots separately. The experiment can delete MDC-managed snapshots, preserving the base model. Existing slang variants and vocabulary exports continue to exclude personal memories.
+
+[Mechanism, usage, privacy and the difference from training](docs/PERSONAL_MEMORY.md) · [Validation scope](RELEASE_NOTES.md)
 
 ## In-app language switching and user input
 

@@ -241,6 +241,7 @@ class Window(QMainWindow):
             self.route_notice.setText("原供应商已删除。请重新选择供应商以新建会话。")
         elif auto_connect:
             QTimer.singleShot(100, self.connect)
+        self.set_busy(False)
 
     def build_speech(self):
         from .speech_ui import SpeechPanel
@@ -275,6 +276,7 @@ class Window(QMainWindow):
         if self.speech.hw:
             self.speech.scanned(self.speech.hw)
         self.speech.show_quality()
+        self.refresh_personal_models()
 
     def page(self, eyebrow, title, subtitle, scroll=True):
         body = QWidget()
@@ -330,6 +332,10 @@ class Window(QMainWindow):
             widget.setEnabled(not busy)
         self.model_combo.setEnabled(not busy and self.engine.backend == "local")
         self.variant_button.setEnabled(not busy and self.engine.backend == "local")
+        for widget in [self.personal_preview, self.personal_save, self.personal_delete]:
+            widget.setEnabled(not busy and self.engine.backend == "local" and self.connected)
+        for widget in [self.personal_auto, self.personal_persona, self.personal_picker]:
+            widget.setEnabled(not busy)
         self.stop_button.setEnabled(busy)
         self.update_counter()
         self.persona_counter()
@@ -347,6 +353,9 @@ class Window(QMainWindow):
             self.pending_text = ""
             self.refresh_sessions()
             self.render_chat()
+        elif kind == "personal_model":
+            self.refresh_personal_models()
+            self.status.setText("私有记忆模型已保存；基础权重未改变。")
         elif kind == "retrieval":
             self.retrieval.setText("知识参考：" + (tr(str(value)) if value == "本轮未命中黑话词条" else str(value)))
         else:
@@ -373,6 +382,7 @@ class Window(QMainWindow):
         self.render_chat()
         self.refresh_memory()
         self.refresh_knowledge()
+        self.refresh_personal_models()
         if callback:
             QTimer.singleShot(0, callback)
         QTimer.singleShot(50, self.speech.maybe_auto)
@@ -680,6 +690,36 @@ class Window(QMainWindow):
         col.addWidget(label("资料最多 500 个 UTF-8 字节，约 160 个中文字符；会占用主聊天上下文。", "muted", True))
         box.addWidget(frame)
         row = QHBoxLayout()
+        experiment, exp = card()
+        exp.addWidget(label("私有记忆模型 · 实验", "section"))
+        exp.addWidget(label("把已确认记忆、用户资料、可选人格和续聊摘要保存为本机模型的默认提示。属于配置快照，仍占上下文，不是权重训练。", "muted", True))
+        self.personal_auto = QCheckBox("自动更新私有模型（仅本机；下次发送及自动续聊时）")
+        self.personal_auto.setChecked(bool(self.store.get("personal_model_auto", False)))
+        self.personal_auto.toggled.connect(lambda value: self.store.set("personal_model_auto", value))
+        exp.addWidget(self.personal_auto)
+        self.personal_persona = QCheckBox("同时写入当前人格提示词")
+        self.personal_persona.setChecked(bool(self.store.get("personal_model_persona", True)))
+        self.personal_persona.toggled.connect(lambda value: self.store.set("personal_model_persona", value))
+        exp.addWidget(self.personal_persona)
+        actions = QHBoxLayout()
+        self.personal_preview = button("预览写入内容", self.preview_personal_model)
+        self.personal_save = button("启用并保存私有模型", self.save_personal_model, True)
+        actions.addWidget(self.personal_preview)
+        actions.addWidget(self.personal_save)
+        actions.addWidget(button("查看自动概括记录", self.show_checkpoints))
+        exp.addLayout(actions)
+        self.personal_picker = QComboBox()
+        self.personal_picker.setProperty('_i18n_user_items', True)
+        exp.addWidget(self.personal_picker)
+        self.personal_info = label("尚未创建私有记忆模型。", "muted", True)
+        self.personal_info.setProperty("_i18n_skip", True)
+        exp.addWidget(self.personal_info)
+        self.personal_delete = button("删除选中私有模型", self.delete_personal_model)
+        exp.addWidget(self.personal_delete, alignment=Qt.AlignmentFlag.AlignLeft)
+        exp.addWidget(label("外部客户端的系统提示可能覆盖快照。删除记忆记录不会清除旧聊天、摘要或旧模型中的副本；请另行处理。API 模式只保存应用内摘要。", "muted", True))
+        exp.addWidget(button("实验机制与限制 ↗", lambda: QDesktopServices.openUrl(QUrl("https://github.com/reaiksp/ModelDock-Chat/blob/main/docs/PERSONAL_MEMORY.md"))))
+        box.addWidget(experiment)
+        self.refresh_personal_models()
         row.addWidget(label("长期记忆", "section"))
         row.addStretch()
         self.analyze_button = button("用当前模型分析三维记忆", self.analyze_memory)
@@ -775,6 +815,90 @@ class Window(QMainWindow):
             self.update_counter()
         except ValueError as exc:
             self.error(str(exc))
+
+    def show_memory_text(self, title, text):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(760, 560)
+        box = QVBoxLayout(dialog)
+        view = QPlainTextEdit()
+        view.setProperty('_i18n_skip', True)
+        view.setReadOnly(True)
+        view.setPlainText(text)
+        box.addWidget(view)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(dialog.reject)
+        box.addWidget(close)
+        dialog.exec()
+
+    def preview_personal_model(self):
+        try:
+            snapshot = self.engine.personal_snapshot(self.session_id)
+            counts = tr("已纳入 {0} 条已确认记忆；预算省略 {1} 条。").format(len(snapshot['included_ids']), snapshot['omitted_count'])
+            counts += "\n" + tr("预算 {0} / {1}；其中预留新输入 {2}。").format(snapshot['used'], snapshot['input_limit'], snapshot['reserved_input'])
+            self.show_memory_text("私有模型写入预览", counts + "\n\n" + snapshot["system"])
+        except ValueError as exc:
+            self.error(str(exc))
+
+    def save_personal_model(self):
+        if self.job:
+            return
+        if not self.connected or self.engine.backend != "local":
+            self.error("请先连接本机 Ollama；API 模式不创建私有模型。")
+            return
+        ident = self.session_id
+        def done(result):
+            self.personal_auto.setChecked(True)
+            self.refresh_personal_models()
+            self.status.setText(f"已保存 {result['name']}；已启用后续自动更新。")
+        self.run_job(lambda j: self.engine.sync_personal_model(ident, j.task, j.event.emit, force=True), done, "personal_model")
+
+    def refresh_personal_models(self):
+        if not hasattr(self, "personal_picker"):
+            return
+        previous = self.personal_picker.currentData()
+        self.personal_picker.clear()
+        rows = self.store.personal_models()
+        for row in rows:
+            self.personal_picker.addItem(row["name"] + " · " + row["base_model"] + (" · !" if not row["manifest"].get("verified", True) else ""), row["name"])
+        if previous and self.personal_picker.findData(previous) >= 0:
+            self.personal_picker.setCurrentIndex(self.personal_picker.findData(previous))
+        valid = [r for r in rows if r["manifest"].get("verified", True)]
+        if valid:
+            latest = valid[0]
+            omitted = latest["manifest"]["omitted_count"]
+            message = tr("保留 {0} 个私有模型版本；最新版本纳入 {1} 条记忆，预算省略 {2} 条。").format(len(rows), len(latest["manifest"]["included_ids"]), omitted)
+            try:
+                current = self.engine.personal_snapshot(self.session_id)
+                if latest["fingerprint"] != current["fingerprint"] or latest["base_model"] != self.engine.personal_base():
+                    message += tr(" 当前资料或会话已变化，快照需更新。")
+            except ValueError:
+                pass
+        else:
+            message = tr("尚无通过校验的私有模型。" if rows else "尚未创建私有记忆模型。")
+        if any(not r["manifest"].get("verified", True) for r in rows):
+            message += tr(" 带 ! 的版本未通过校验，仅供检查或删除。")
+        if self.store.get("personal_model_error", ""):
+            message += tr(" 最近一次自动更新失败；旧版保留，可手动重试。")
+        self.personal_info.setText(message)
+
+    def show_checkpoints(self):
+        rows = self.store.checkpoints()
+        text = "\n\n".join(f"#{r['id']} · {r['source_session']} → {r['target_session']} · {r['provider']} · {r['model']}\n{r['summary']}" for r in rows[:30])
+        self.show_memory_text("自动概括记录 · 未确认参考", text or tr("尚无自动概括记录。"))
+
+    def delete_personal_model(self):
+        if self.job:
+            return
+        name = self.personal_picker.currentData()
+        if not name:
+            return
+        if QMessageBox.question(self, "删除私有模型", f"删除本机私有模型 {name}？基础模型和聊天记录将保留。") != QMessageBox.StandardButton.Yes:
+            return
+        def done(_):
+            self.refresh_personal_models()
+            self.status.setText("选中的私有模型已删除。")
+        self.run_job(lambda j: self.engine.delete_personal_model(name, j.task), done, "personal_delete")
 
     def analyze_memory(self):
         if self.job:

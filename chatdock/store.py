@@ -36,6 +36,15 @@ class Store:
                     status TEXT NOT NULL DEFAULT 'pending', created REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS learning(id INTEGER PRIMARY KEY, provider TEXT NOT NULL, model TEXT NOT NULL,
                     input TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'running', created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS context_checkpoints(
+                    id INTEGER PRIMARY KEY, source_session INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    target_session INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    summary TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL,
+                    through_message INTEGER NOT NULL, created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS personal_models(
+                    id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, base_model TEXT NOT NULL,
+                    persona_id INTEGER NOT NULL, source_session INTEGER, context INTEGER NOT NULL,
+                    fingerprint TEXT NOT NULL, manifest TEXT NOT NULL, created REAL NOT NULL);
                 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id,id);
                 CREATE INDEX IF NOT EXISTS idx_knowledge_status ON knowledge(status);
             """)
@@ -202,3 +211,41 @@ class Store:
         for item in entries:
             self.add_knowledge(item["term"], item["definition"], item.get("example", ""), item.get("aliases", ""), "导入：" + item.get("source", ""))
         return len(entries)
+
+
+    def continue_session(self, source_id, summary, model, provider):
+        """Commit the continuation and its summary checkpoint together; never edit originals."""
+        if not summary.strip():
+            raise ValueError("续聊摘要为空，原始对话已保留，请重试。")
+        with self.db() as db:
+            source = db.execute("SELECT * FROM sessions WHERE id=?", (source_id,)).fetchone()
+            if source is None:
+                raise ValueError("会话不存在或已删除。")
+            last = db.execute("SELECT COALESCE(MAX(id),0) FROM messages WHERE session_id=? AND status='complete'", (source_id,)).fetchone()[0]
+            stamp = time.time()
+            target = db.execute("INSERT INTO sessions(title,persona_id,parent_id,summary,created,route_id) VALUES (?,?,?,?,?,?)",
+                (source["title"][:25] + " · 续聊", source["persona_id"], source_id, summary, stamp, source["route_id"])).lastrowid
+            db.execute("INSERT INTO context_checkpoints(source_session,target_session,summary,model,provider,through_message,created) VALUES (?,?,?,?,?,?,?)",
+                (source_id, target, summary, model, provider, last, stamp))
+            return target
+
+    def checkpoints(self, session_id=None):
+        if session_id is None:
+            return self.all("SELECT * FROM context_checkpoints ORDER BY id DESC")
+        return self.all("SELECT * FROM context_checkpoints WHERE source_session=? OR target_session=? ORDER BY id DESC", (session_id, session_id))
+
+    def personal_models(self):
+        rows = self.all("SELECT * FROM personal_models ORDER BY id DESC")
+        for row in rows:
+            row["manifest"] = json.loads(row["manifest"])
+        return rows
+
+    def save_personal_model(self, name, base_model, persona_id, source_session, context, snapshot, verified=True):
+        # Contents already exist in the user's SQLite store; only metadata is duplicated here.
+        manifest = {k: snapshot[k] for k in ("included_ids", "omitted_count", "include_persona", "summary_included")}
+        manifest["verified"] = verified
+        return self.execute("INSERT INTO personal_models(name,base_model,persona_id,source_session,context,fingerprint,manifest,created) VALUES (?,?,?,?,?,?,?,?)",
+            (name, base_model, persona_id, source_session, context, snapshot["fingerprint"], json.dumps(manifest), time.time()))
+
+    def forget_personal_model(self, name):
+        self.execute("DELETE FROM personal_models WHERE name=?", (name,))
