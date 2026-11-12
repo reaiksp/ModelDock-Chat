@@ -52,6 +52,7 @@ class SpeechPanel(QWidget):
         note.setWordWrap(True)
         box.addWidget(note)
         self.button("录音克隆与训练支持说明 ↗", lambda:__import__('PySide6.QtGui',fromlist=['QDesktopServices']).QDesktopServices.openUrl(QUrl("https://github.com/reaiksp/ModelDock-Chat/blob/main/docs/SPEECH_CAPABILITIES.md")), box)
+        from .voice_training_ui import VoiceTrainingPanel
         self.tabs = QTabWidget()
         box.addWidget(self.tabs)
         deployment = QWidget()
@@ -59,6 +60,8 @@ class SpeechPanel(QWidget):
         evaluation = QWidget()
         for widget, title in [(deployment, "联合部署"), (readout, "朗读与偏好"), (evaluation, "质量与历史")]:
             self.tabs.addTab(widget, title)
+        self.training_panel = VoiceTrainingPanel(self)
+        self.tabs.addTab(self.training_panel, "多音频训练")
         box = QVBoxLayout(deployment)
         form = QFormLayout()
         self.mode = QComboBox()
@@ -73,6 +76,7 @@ class SpeechPanel(QWidget):
         form.addRow("语音模型", self.variant)
         self.usage = QComboBox()
         self.usage.addItem("通用对话", "chat")
+        self.usage.addItem("Gemma 3 · 12B IT QAT", "gemma")
         self.usage.addItem("代码开发", "code")
         self.usage.addItem("压缩大模型", "compressed")
         self.usage.setCurrentIndex(max(0, self.usage.findData(self.settings.get("usage", "chat"))))
@@ -237,8 +241,21 @@ class SpeechPanel(QWidget):
         form.addRow("朗读语言", self.language)
         self.style = QLineEdit(self.settings.get("instruct", ""))
         self.style.setMaxLength(1000)
-        self.style.setPlaceholderText("例如：温和、清晰地朗读。1.7B 支持语气指令。")
+        self.style.setPlaceholderText("例如：轻快、带笑意地说。仅 1.7B CustomVoice 支持。")
         form.addRow("个人语气偏好", self.style)
+        self.tone_preset = QComboBox()
+        for caption, prompt in [("选择语气示例（不覆盖已填提示）", ""),
+                                ("温柔", "温柔、自然地说，语速稍慢。"),
+                                ("开心", "轻快、带笑意地说。"),
+                                ("严肃", "严肃、沉稳、清晰地说。"),
+                                ("讲故事", "像讲故事一样有起伏地说。")]:
+            self.tone_preset.addItem(caption, prompt)
+        self.tone_preset.activated.connect(lambda _: self.style.setText(self.tone_preset.currentData()) if self.tone_preset.currentData() else None)
+        form.addRow("语气示例", self.tone_preset)
+        self.tone_note = QLabel("仅 1.7B CustomVoice 支持语气提示；0.6B 和 Base 克隆不支持。Base 微调音色也不保证学会语气控制。")
+        self.tone_note.setWordWrap(True)
+        form.addRow(self.tone_note)
+
         self.rate = QDoubleSpinBox()
         self.rate.setRange(.5, 2)
         self.rate.setSingleStep(.1)
@@ -321,6 +338,13 @@ class SpeechPanel(QWidget):
         self.player.setPlaybackRate(self.rate.value())
         self.audio.setVolume(self.volume.value() / 100)
         self.update_recommendations()
+        self.variant.currentIndexChanged.connect(self.update_tone_controls)
+        self.update_tone_controls()
+
+    def update_tone_controls(self):
+        capable = self.variant.currentData() == "1.7B"
+        self.style.setEnabled(capable)
+        self.tone_preset.setEnabled(capable)
 
     @staticmethod
     def button(text, callback, layout):

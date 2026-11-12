@@ -1,5 +1,9 @@
 # ModelDock Chat
 
+## 语气提示与批量音频训练
+
+新增 1.7B CustomVoice 语气示例、多录音与对应文本的表格编辑、同名 TXT / CSV 导入和本机训练入口；联合部署可选 `gemma3:12b-it-qat`。参见 [使用说明](docs/VOICE_TRAINING.md)。
+
 模型目录可在界面选择、校验迁移并应用；文字与语音权重可分别选盘。 / Select model storage in the app, verify and migrate files, then apply the directory. Text and speech weights can use separate disks. [说明 / Details](docs/MODEL_STORAGE.md)
 
 上下文五档：2K / 4K / 6K / 8K / 10K；已部署方案保持原上下文。 / Context levels:2K /4K /6K /8K /10K. Existing deployed plans retain their context.

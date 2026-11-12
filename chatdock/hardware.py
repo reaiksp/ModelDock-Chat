@@ -20,7 +20,8 @@ VOICE_MODELS = {
 TEXT_MODELS = {
     "chat": [("qwen3:0.6b", .5, 1.8), ("qwen3:1.7b", 1.31, 3),
              ("qwen3:4b", 2.33, 4.8), ("qwen3:8b", 4.85, 7.5),
-             ("qwen3:14b", 8.67, 12.5), ("qwen3:32b", 18.63, 25)],
+             ("gemma3:12b-it-qat", 8.4, 12.0), ("qwen3:14b", 8.67, 12.5), ("qwen3:32b", 18.63, 25)],
+    "gemma": [("gemma3:12b-it-qat", 8.4, 12.0)],
     "code": [("qwen2.5-coder:0.5b", .38, 1.6), ("qwen2.5-coder:1.5b", .92, 2.8),
              ("qwen2.5-coder:3b", 1.77, 4.4), ("qwen2.5-coder:7b", 4.38, 7),
              ("qwen2.5-coder:14b", 8.38, 12), ("qwen2.5-coder:32b", 18.63, 25)],

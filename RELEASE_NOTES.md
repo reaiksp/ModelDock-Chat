@@ -1,3 +1,10 @@
+# 0.7.4 — Voice dataset editor and Gemma QAT
+
+- Batch audio/transcript GUI with TXT and CSV pairing, validation, transactional import, training status and checkpoint audition.
+- Clearly expose tone examples for 1.7B CustomVoice; 0.6B/Base do not gain instruction control.
+- Add the native Gemma 3 12B IT QAT tag with joint voice/context budgeting. No installed weights are changed by this source update.
+- Private K self-use modules and configuration are excluded.
+
 # 0.7.3 · 模型换盘与真实目录校验 / Model storage selection
 
 - MD/MDC新增文字模型目录选择与应用；MDC新增独立语音模型文件目录，下载缓存跟随所选目录。

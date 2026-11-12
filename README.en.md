@@ -1,5 +1,9 @@
 # ModelDock Chat (MDC)
 
+## Tone prompts and batch voice training
+
+Added 1.7B CustomVoice tone examples, paired multi-clip transcript editing, TXT / CSV import, and local training controls. Joint deployment also offers `gemma3:12b-it-qat`. See the [training guide](docs/VOICE_TRAINING.md).
+
 Select model storage in the app, verify and migrate files, then apply the directory. Text and speech weights can use separate disks. [说明 / Details](docs/MODEL_STORAGE.md)
 
 上下文五档：2K / 4K / 6K / 8K / 10K；已部署方案保持原上下文。 / Context levels:2K /4K /6K /8K /10K. Existing deployed plans retain their context.
@@ -12,7 +16,7 @@ New parameter-cap slider:0.5B–48B in0.5B steps, selecting corresponding quanti
 
 Development assistance: **OpenAI Codex**. The initial application code and documentation were developed with Codex assistance.
 
-Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.3 experimental**.
+Repository: [reaiksp/ModelDock-Chat](https://github.com/reaiksp/ModelDock-Chat). Version: **0.7.4 experimental (source update)**.
 
 ## Two recommendation sliders (0.7.3)
 

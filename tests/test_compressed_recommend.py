@@ -26,7 +26,7 @@ def test_compressed_choice_for_gpu_budget(vram, quant):
 
 
 def test_catalog_uses_exact_non_mtp_files_and_preserves_existing_uses():
-    assert [m[0] for m in TEXT_MODELS['chat']] == ['qwen3:0.6b', 'qwen3:1.7b', 'qwen3:4b', 'qwen3:8b', 'qwen3:14b', 'qwen3:32b']
+    assert [m[0] for m in TEXT_MODELS['chat']] == ['qwen3:0.6b', 'qwen3:1.7b', 'qwen3:4b', 'qwen3:8b', 'gemma3:12b-it-qat', 'qwen3:14b', 'qwen3:32b']
     assert len(TEXT_MODELS['compressed']) == 4
     for tag, download, memory in TEXT_MODELS['compressed']:
         data = TEXT_METADATA[tag]
